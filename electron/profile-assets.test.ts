@@ -1,0 +1,23 @@
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, it } from 'vitest';
+import { FileProjectRepository, initializeStorageRoot } from './storage';
+it('stores managed image references, persists profiles and copies assets with project snapshots', async () => {
+  const root = await mkdtemp(join(tmpdir(),'profile-assets-'));
+  await initializeStorageRoot(root);
+  const repository = new FileProjectRepository(root), project = await repository.create('Profiles','feature');
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=';
+  const assetId = await repository.importProjectImage(project.id,image);
+  const workspace = await repository.openWorkspace(project.id), story = workspace.story!;
+  story.characters.push({ id:'c',name:'Character',description:'',profile:{ age:'30s', images:[{ id:'image',assetId,label:'Primary' }],primaryImageId:'image' } });
+  await repository.saveStory(project.id,story);
+  const reopened = new FileProjectRepository(root);
+  expect((await reopened.openWorkspace(project.id)).story).toEqual(story);
+  expect(await reopened.readProjectImage(project.id,assetId)).toBe(image);
+  await repository.snapshot(project,'profile-test');
+  expect((await readFile(join(root,'Backups',project.id,'assets',assetId+'.bin'))).length).toBeGreaterThan(0);
+  await expect(repository.readProjectImage(project.id,'../../outside')).rejects.toThrow();
+  await expect(repository.importProjectImage(project.id,'data:image/svg+xml;base64,PHN2Zz4=')).rejects.toThrow();
+  await expect(repository.importProjectImage(project.id,'data:image/png;base64,ZmFrZQ==')).rejects.toThrow();
+});

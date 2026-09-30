@@ -1,0 +1,72 @@
+{
+  "name": "screenplay-desktop",
+  "version": "0.2.4",
+  "private": true,
+  "description": "Local-first screenplay application foundation",
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:electron && node scripts/dev.mjs",
+    "build:electron": "node scripts/build-electron.mjs",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.electron.json --noEmit",
+    "build": "npm run typecheck && vite build && npm run build:electron",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win nsis",
+    "package:win:dir": "npm run build && electron-builder --win dir"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yutopia-storm/MimicWriter.git"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "lucide-react": "^1.47.0",
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-history": "^1.5.0",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.11",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-view": "^1.42.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.0.12",
+    "jsdom": "^26.1.0",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vitest": "^5.0.1"
+  },
+  "build": {
+    "appId": "com.storytools.desktop",
+    "productName": "MimicWriter",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

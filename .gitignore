@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+release-test/
+release-desktop/
+.artifacts/
+*.log
+scrinit-screenwriting-tools
+.env
+.env.*
+!.env.example
