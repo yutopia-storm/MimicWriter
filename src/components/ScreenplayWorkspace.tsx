@@ -382,7 +382,7 @@ export function ScreenplayWorkspaceView({
           <FilePlus2 />
           <div className="eyebrow">SERIES SCREENPLAYS</div>
           <h1>Begin with an episode.</h1>
-          <p>Each episode has its own screenplay and stable identity.</p>
+          <p>Each episode has its own screenplay.</p>
           <div>
             <input
               aria-label="Episode title"
@@ -452,6 +452,7 @@ function ScreenplayEditor({
   episodeNavigation?: ReactNode;
 }) {
   const [storyOpen, setStoryOpen] = useState(false);
+  const [worldDraft, setWorldDraft] = useState(workspace.story);
   const [storySaveState, setStorySaveState] = useState<SaveState>("saved");
   const [storySceneId, setStorySceneId] = useState<string | undefined>();
   const sessionKey = `screenplay-editor-session:${initial.id}`;
@@ -974,7 +975,7 @@ function ScreenplayEditor({
       className={`screenplay-layout writing-layout${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
       onClick={() => sceneMenu && setSceneMenu(null)}
     >
-      <StoryPanel characterCardsVisible={characterCardsVisible} locationCardsVisible={locationCardsVisible} onOpen={() => { setStorySceneId(undefined); setStoryOpen(true); }} navigateScene={id => { if (screenplay.scenes.some(scene => scene.id === id)) { setLocationFilter("all"); setActiveSceneId(id); requestAnimationFrame(() => document.querySelector(`[data-scene-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" })); } else window.dispatchEvent(new CustomEvent("profile-navigate-scene", { detail: id })); }} workspace={workspace} screenplay={screenplay} open={storyOpen} sceneId={storySceneId} plotTerm={plotTerm} timelineTerm={timelineTerm} onClose={() => setStoryOpen(false)} onState={state => { setStorySaveState(state); onStoryState(state); }} onSaved={onStorySaved} />
+      <StoryPanel onDraft={setWorldDraft} characterCardsVisible={characterCardsVisible} locationCardsVisible={locationCardsVisible} onOpen={() => { setStorySceneId(undefined); setStoryOpen(true); }} navigateScene={id => { if (screenplay.scenes.some(scene => scene.id === id)) { setLocationFilter("all"); setActiveSceneId(id); requestAnimationFrame(() => document.querySelector(`[data-scene-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" })); } else window.dispatchEvent(new CustomEvent("profile-navigate-scene", { detail: id })); }} workspace={workspace} screenplay={screenplay} open={storyOpen} sceneId={storySceneId} plotTerm={plotTerm} timelineTerm={timelineTerm} onClose={() => setStoryOpen(false)} onState={state => { setStorySaveState(state); onStoryState(state); }} onSaved={onStorySaved} />
       <aside className={`scene-navigator${sidebarCollapsed ? " collapsed" : ""}`}>
         <button
           type="button"
@@ -1171,7 +1172,7 @@ function ScreenplayEditor({
             style={{ ...formatStyle, "--screenplay-page-count": paginatedPages.length } as CSSProperties}
             spellCheck
           >
-            <ContinuousScreenplayEditor notesVisible={notesVisible} searchMatches={findOpen ? occurrences : []} activeSearchMatch={activeSearchMatch} onUndo={undo} onRedo={redo} physicalPages={editorView === "continuous"} pages={paginatedPages} layout={layout} screenplay={screenplay} sceneId={editorView === "scene" ? activeScene.id : undefined} sceneIds={editorView === "screenplay" && activeLocationFilter !== "all" ? visibleScenes.map((scene) => scene.id) : undefined} onChange={(next, transaction) => commit(next, true, transaction)} onSceneCommand={(sceneId, command) => { const scene = screenplay.scenes.find((item) => item.id === sceneId); if (!scene) return; if (command === 'up' || command === 'down') commit(moveScene(screenplay, sceneId, command === 'up' ? -1 : 1)); else if (command === 'lock') commit(updateScene(screenplay, sceneId, (item) => ({ ...item, locked: !item.locked }))); else if (command === 'delete') setPendingDelete(scene); else if (command === 'metadata') { setStorySceneId(sceneId); setStoryOpen(true); } else addScene(sceneId); }} />
+            <ContinuousScreenplayEditor worldStory={worldDraft} notesVisible={notesVisible} searchMatches={findOpen ? occurrences : []} activeSearchMatch={activeSearchMatch} onUndo={undo} onRedo={redo} physicalPages={editorView === "continuous"} pages={paginatedPages} layout={layout} screenplay={screenplay} sceneId={editorView === "scene" ? activeScene.id : undefined} sceneIds={editorView === "screenplay" && activeLocationFilter !== "all" ? visibleScenes.map((scene) => scene.id) : undefined} onChange={(next, transaction) => commit(next, true, transaction)} onSceneCommand={(sceneId, command) => { const scene = screenplay.scenes.find((item) => item.id === sceneId); if (!scene) return; if (command === 'up' || command === 'down') commit(moveScene(screenplay, sceneId, command === 'up' ? -1 : 1)); else if (command === 'lock') commit(updateScene(screenplay, sceneId, (item) => ({ ...item, locked: !item.locked }))); else if (command === 'delete') setPendingDelete(scene); else if (command === 'metadata') { setStorySceneId(sceneId); setStoryOpen(true); } else addScene(sceneId); }} />
           </div>
       </main>
         <footer className="screenplay-statistics">
@@ -1290,7 +1291,7 @@ function ScreenplayEditor({
             <h2>Delete scene?</h2>
             <p>
               “{sceneHeading(pendingDelete, pendingDelete.order + 1)}” and all
-              content will be removed. Independent events and story metadata will be retained; their scene links will be marked as removed until restored.
+              content will be removed. Independent events and story details will be retained; their scene links will be marked as removed until restored.
             </p>
             <div>
               <button
@@ -1723,7 +1724,7 @@ function LegacyScreenplayEditor({
             <h2>Delete scene?</h2>
             <p>
               “{sceneHeading(pendingDelete, pendingDelete.order + 1)}” and all
-              of its content will be removed. Independent events and story metadata will be retained; their scene links will be marked as removed until restored. This cannot be undone.
+              of its content will be removed. Independent events and story details will be retained; their scene links will be marked as removed until restored. This cannot be undone.
             </p>
             <div>
               <button

@@ -1,11 +1,12 @@
+import { StoryIcon } from './StoryIcon';
 import { ProfileImage } from './ProfileEditor';
 import { characterStatistics } from '../domain/profiles';
 import { useEffect, useMemo, useState } from 'react';
 import type { ProjectWorkspace, ScreenplayRecord } from '../shared/models';
 import type { Plot, StoryEntity, StoryRecord } from '../shared/story';
-import { activitySummary, getEffectiveScenesForPlot, getEventsForPlot, queryTimeline, type TimelineFilter } from '../domain/story';
+import { characterDisplayName, activitySummary, getEffectiveScenesForPlot, getEventsForPlot, queryTimeline, type TimelineFilter } from '../domain/story';
 import { mergeIdentity, separateIdentity } from '../domain/story-identities';
-import { PLOT_STATUSES, STORY_COLORS, storyColor } from '../shared/story-config';
+import { PLOT_STATUSES, STORY_COLORS, nextPlotColor, storyColor } from '../shared/story-config';
 import { Choices, names, type Named } from './StoryControls';
 
 export function StoryEntityIndex({ kind, story, documents, workspace, plotTerm, sceneOptions, selectedId, change, remove, viewTimeline, createEventForPlot }: {
@@ -27,7 +28,7 @@ export function StoryEntityIndex({ kind, story, documents, workspace, plotTerm, 
   const update = (patch: Partial<Plot>) => item && change({ ...story, [kind]: story[kind].map(value => value.id === item.id ? { ...value, ...patch } : value) });
   const add = () => {
     const id = crypto.randomUUID();
-    change({ ...story, [kind]: [...story[kind], { id, name: `Untitled ${term}`, description: '', ...(kind === 'plots' ? { color: STORY_COLORS[story.plots.length % STORY_COLORS.length], label: `Plot ${String.fromCharCode(65 + story.plots.length % 26)}`, status: 'planned', ...(workspace.project.projectType === 'series' ? { scope: 'series' } : {}) } : {}) }] });
+    change({ ...story, [kind]: [...story[kind], { id, name: `Untitled ${term}`, description: '', ...(kind === 'plots' ? { color: nextPlotColor(story.plots), label: `Plot ${String.fromCharCode(65 + story.plots.length % 26)}`, status: 'planned', ...(workspace.project.projectType === 'series' ? { scope: 'series' } : {}) } : {}) }] });
     setSelected(id);
   };
   const parentOptions = story[kind].filter(candidate => {
@@ -44,7 +45,7 @@ export function StoryEntityIndex({ kind, story, documents, workspace, plotTerm, 
   return <><div className="story-toolbar"><label>Sort index<select aria-label="Sort index" value={sort} onChange={event => setSort(event.target.value)}><option value="introduction">Screenplay introduction</option><option value="name">Name</option><option value="scenes">Most scenes</option><option value="recent">Latest story appearance</option>{kind === 'characters' && <option value="dialogue">Most dialogue</option>}</select></label><input aria-label={`Search ${kind}`} placeholder={`Search ${kind}…`} value={search} onChange={event => setSearch(event.target.value)} /><button onClick={add}>Add {term}</button><label><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Show archived</label></div>
     <div className="story-index-layout"><div className="story-index">{ordered.filter(item => (archived || !item.archived) && [item.name, item.profile?.shortName ?? '', ...item.sourceNames ?? [], ...item.profile?.aliases ?? [], ...story.locations.filter(child => kind === 'locations' && child.parentId === item.id).map(child => child.name)].some(name => name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).map(item => { const info = summaries.get(item.id)!; return <button key={item.id} className={item.id === selected ? 'active' : ''} onClick={() => { setSelected(item.id); setMergeTarget(''); setMessage(''); }} style={'color' in item ? { borderLeftColor: storyColor(String(item.color)) } : undefined}>
       {item.profile?.primaryImageId && <ProfileImage projectId={story.projectId} assetId={item.profile.images?.find(image => image.id === item.profile?.primaryImageId)?.assetId} />}<small>{[item.profile?.age, item.profile?.occupation, item.profile?.locationType].filter(Boolean).join(' · ')}</small>
-      <b>{'label' in item && item.label ? `${item.label} · ` : ''}{item.name}{item.archived ? ' (archived)' : ''}</b>
+      <b style={'color' in item ? { color: storyColor(String(item.color)) } : undefined}><StoryIcon kind={kind === 'plots' ? 'plot' : kind === 'characters' ? 'character' : 'location'}/>{'label' in item && item.label ? `${item.label} · ` : ''}{kind === 'characters' ? characterDisplayName(story,item) : item.name}{item.archived ? ' (archived)' : ''}</b>
       {'status' in item && <small>{'scope' in item ? `${item.scope ?? ''} · ` : ''}{String(item.status ?? '')}</small>}
       <small>{!info.scenes ? 'Unused · ' : ''}{info.scenes} scenes · {info.events} events{info.range ? ` · ${info.range}` : ''}</small>{info.plotIds.length > 0 && kind !== 'plots' && <small>{names(info.plotIds, story.plots)}</small>}
     </button>; })}</div>
@@ -54,7 +55,7 @@ export function StoryEntityIndex({ kind, story, documents, workspace, plotTerm, 
         {summary.first && <p>First appearance: {summary.first.name}</p>}{summary.latest && summary.latest.id !== summary.first?.id && <p>Latest appearance: {summary.latest.name}</p>}
         {kind !== 'plots' && !!summary.plotIds.length && <p>{plotTerm}s: {names(summary.plotIds, story.plots)}</p>}
         {kind === 'characters' && !!summary.locationIds.length && <p>Locations: {names(summary.locationIds, story.locations)}</p>}
-        {kind === 'locations' && !!summary.characterIds.length && <p>Characters seen here: {names(summary.characterIds, story.characters)}</p>}
+        {kind === 'locations' && !!summary.characterIds.length && <p>Characters seen here: {names(summary.characterIds, story.characters.map(c=>({...c,name:characterDisplayName(story,c)})))}</p>}
       </div>
       {kind !== 'plots' && <><button onClick={() => { window.dispatchEvent(new CustomEvent('open-story-profile', { detail: { type: kind === 'characters' ? 'character' : 'location', entityId: item.id, full: true } })); }}>Open full profile</button> <button onClick={() => { window.dispatchEvent(new CustomEvent('open-story-profile', { detail: { type: kind === 'characters' ? 'character' : 'location', entityId: item.id } })); }}>Open in inspector</button></>}
       <button onClick={() => viewTimeline(kind === 'plots' ? { plotIds: [item.id] } : kind === 'characters' ? { characterIds: [item.id], relationship: 'present' } : { locationId: item.id })}>View timeline</button>

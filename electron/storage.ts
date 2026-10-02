@@ -1,3 +1,5 @@
+import { parseWorldPackage } from '../src/domain/worlds';
+import type { WorldPackage } from '../src/shared/worlds';
 import { validateProfileImage } from '../src/shared/profile-assets';
 import { z } from 'zod';
 import { access, mkdir, readdir, rm, writeFile, readFile, copyFile } from 'node:fs/promises';
@@ -10,6 +12,8 @@ import { createScreenplay, validateScreenplay, normalizeSceneHeadings } from '..
 import { readJson, writeJsonAtomic } from './json-store';
 import { migrateStory } from '../src/domain/story';
 import type { StoryRecord } from '../src/shared/story';
+
+const worldLibraryWrites = new Map<string, Promise<unknown>>();
 
 export const MANAGED_FOLDERS = ['Projects', 'Collections', 'Backups', 'Exports', 'References'] as const;
 
@@ -149,6 +153,30 @@ export class FileProjectRepository {
   async reorderSeason(projectId: string, seasonId: string, targetIndex: number): Promise<ProjectWorkspace> { const project = await this.get(projectId); if (!project.series) throw new Error('Series project structure is missing.'); const seasons = [...project.series.seasons]; const source = seasons.findIndex((season) => season.id === seasonId); if (source < 0) throw new Error('Series/Season could not be found.'); const [season] = seasons.splice(source, 1); seasons.splice(Math.max(0, Math.min(targetIndex, seasons.length)), 0, season); return this.writeProject({ ...project, updatedAt: new Date().toISOString(), series: { ...project.series, seasons } }); }
   async moveEpisode(projectId: string, episodeId: string, targetSeasonId: string, targetIndex: number): Promise<ProjectWorkspace> { const project = await this.get(projectId); if (!project.series) throw new Error('Series project structure is missing.'); const sourceSeason = project.series.seasons.find((season) => season.episodes.some((episode) => episode.id === episodeId)); const targetSeason = project.series.seasons.find((season) => season.id === targetSeasonId); const episode = sourceSeason?.episodes.find((item) => item.id === episodeId); if (!sourceSeason || !targetSeason || !episode) throw new Error('Episode or target Series/Season could not be found.'); const seasons = project.series.seasons.map((season) => ({ ...season, episodes: season.episodes.filter((item) => item.id !== episodeId) })); const target = seasons.find((season) => season.id === targetSeasonId)!; target.episodes.splice(Math.max(0, Math.min(targetIndex, target.episodes.length)), 0, episode); return this.writeProject({ ...project, updatedAt: new Date().toISOString(), series: { ...project.series, seasons } }); }
 
+  async deleteLibraryWorld(id: string): Promise<void> {
+    if (typeof id !== 'string' || !id) throw new Error('World identifier is required.');
+    const write = (worldLibraryWrites.get(this.root) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const previous = await this.listWorldLibrary();
+      await mkdir(join(this.root, 'Backups', 'Worlds'), { recursive: true });
+      await writeJsonAtomic(join(this.root, 'Backups', 'Worlds', Date.now() + '-' + randomUUID() + '.json'), previous);
+      await writeJsonAtomic(join(this.root, 'References', 'world-library.json'), previous.filter(p => p.world.id !== id));
+    });
+    worldLibraryWrites.set(this.root, write);
+    try { await write; } finally { if (worldLibraryWrites.get(this.root) === write) worldLibraryWrites.delete(this.root); }
+  }
+  async listWorldLibrary(): Promise<WorldPackage[]> { return (await readJson<WorldPackage[]>(join(this.root, 'References', 'world-library.json'), [])).map(parseWorldPackage); }
+  async saveLibraryWorld(value: WorldPackage): Promise<WorldPackage> {
+    const p = parseWorldPackage(value);
+    const write = (worldLibraryWrites.get(this.root) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const previous = await this.listWorldLibrary();
+      await mkdir(join(this.root, 'Backups', 'Worlds'), { recursive: true });
+      await writeJsonAtomic(join(this.root, 'Backups', 'Worlds', Date.now() + '-' + randomUUID() + '.json'), previous);
+      await writeJsonAtomic(join(this.root, 'References', 'world-library.json'), [...previous.filter(x => x.world.id !== p.world.id), p]);
+      return p;
+    });
+    worldLibraryWrites.set(this.root, write);
+    try { return await write; } finally { if (worldLibraryWrites.get(this.root) === write) worldLibraryWrites.delete(this.root); }
+  }
   async listCollections(): Promise<ProjectCollection[]> { return readJson<ProjectCollection[]>(this.collectionsFile(), []); }
   private async saveCollections(collections: ProjectCollection[]) { await writeJsonAtomic(this.collectionsFile(), collections); return collections; }
   async createCollection(name: string) { const collections = await this.listCollections(); const now = new Date().toISOString(); return this.saveCollections([...collections, { schemaVersion: 1, id: randomUUID(), name: name.trim(), projectIds: [], createdAt: now, updatedAt: now }]); }

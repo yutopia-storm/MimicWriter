@@ -1,3 +1,5 @@
+import type { StoryRecord } from '../shared/story';
+import type { WorldOccurrence } from '../shared/worlds';
 import type { SearchOccurrence } from '../domain/editor-operations';
 import { useEffect, useRef, useState } from "react";
 import { AllSelection, EditorState, Plugin, TextSelection } from "prosemirror-state";
@@ -85,7 +87,8 @@ function noteSelectionForState(state: EditorState, view: EditorView): NoteSelect
   }
 }
 
-export function ContinuousScreenplayEditor({ screenplay, notesVisible = true, searchMatches = [], activeSearchMatch, sceneId, sceneIds, pages = [], layout, physicalPages = false, onChange, onUndo, onRedo, onSceneCommand }: { screenplay: ScreenplayRecord; notesVisible?: boolean; searchMatches?: SearchOccurrence[]; activeSearchMatch?: SearchOccurrence; pages?: ScreenplayPage[]; physicalPages?: boolean; layout?: ScreenplayLayout; sceneId?: string; sceneIds?: string[]; onChange(next: ScreenplayRecord, transaction?: string): void; onUndo?(): void; onRedo?(): void; onSceneCommand?(sceneId: string, command: 'up'|'down'|'lock'|'delete'|'add'|'metadata'): void }) {
+export function ContinuousScreenplayEditor({ screenplay, worldStory, notesVisible = true, searchMatches = [], activeSearchMatch, sceneId, sceneIds, pages = [], layout, physicalPages = false, onChange, onUndo, onRedo, onSceneCommand }: { screenplay: ScreenplayRecord; worldStory?: StoryRecord; notesVisible?: boolean; searchMatches?: SearchOccurrence[]; activeSearchMatch?: SearchOccurrence; pages?: ScreenplayPage[]; physicalPages?: boolean; layout?: ScreenplayLayout; sceneId?: string; sceneIds?: string[]; onChange(next: ScreenplayRecord, transaction?: string): void; onUndo?(): void; onRedo?(): void; onSceneCommand?(sceneId: string, command: 'up'|'down'|'lock'|'delete'|'add'|'metadata'): void }) {
+  const worldRef = useRef(worldStory); worldRef.current = worldStory;
   const pagination = useRef({ pages, physicalPages, layout: layout ?? resolveLayout(screenplay.layout) }); pagination.current = { pages, physicalPages, layout: layout ?? resolveLayout(screenplay.layout) };
   const visibleSceneKey = sceneIds?.join('|');
   const host = useRef<HTMLDivElement>(null); const viewRef = useRef<EditorView | null>(null); const latest = useRef(screenplay); latest.current = screenplay;
@@ -96,6 +99,7 @@ export function ContinuousScreenplayEditor({ screenplay, notesVisible = true, se
   const previousPresentation = useRef({ physicalPages, sceneId, visibleSceneKey });
   const sceneCommand = useRef(onSceneCommand); sceneCommand.current = onSceneCommand;
   const historyCommands = useRef({ onUndo, onRedo }); historyCommands.current = { onUndo, onRedo };
+  useEffect(() => { const view = viewRef.current; if (view && !view.isDestroyed) view.dispatch(view.state.tr.setMeta('world-presentation', true)); }, [worldStory]);
   const [clipboardError, setClipboardError] = useState('');
   const [noteSelection, setNoteSelection] = useState<NoteSelection | null>(null);
   const [noteComposer, setNoteComposer] = useState(false);
@@ -195,6 +199,20 @@ export function ContinuousScreenplayEditor({ screenplay, notesVisible = true, se
       const decorations: Decoration[] = [];
       const matches = new Map<string, SearchOccurrence[]>();
       for (const match of searchRef.current) matches.set(match.elementId, [...(matches.get(match.elementId) ?? []), match]);
+      if (worldRef.current?.worldUi?.showLinks) {
+        const anchors = new Map<string, { position: number; size: number }>();
+        state.doc.descendants((node, pos) => { if (node.type === schema.nodes.screenplay_element) anchors.set(node.attrs.elementId, { position: pos + 1, size: node.content.size }); });
+        for (const occurrence of worldRef.current.worldOccurrences ?? []) {
+          if (occurrence.screenplayId !== latest.current.id || occurrence.scope !== 'text' || occurrence.needsReview || !occurrence.from || !occurrence.to) continue;
+          const a = anchors.get(occurrence.from.elementId), b = anchors.get(occurrence.to.elementId);
+          if (!a || !b || occurrence.from.offset > a.size || occurrence.to.offset > b.size) continue;
+          const from = a.position + occurrence.from.offset, to = b.position + occurrence.to.offset;
+          if (to <= from || state.doc.textBetween(from, to, '\n', '\n') !== occurrence.selectedText) continue;
+          const story = worldRef.current, world = story.worlds?.find(w => w.id === occurrence.worldId);
+          const entity = world?.entities.find(e => e.id === occurrence.entity.id) ?? (occurrence.entity.kind === 'character' ? story.characters : occurrence.entity.kind === 'location' ? story.locations : occurrence.entity.kind === 'event' ? story.events : story.plots).find(e => e.id === occurrence.entity.id);
+          decorations.push(Decoration.inline(from, to, { class: 'world-occurrence', 'data-world-occurrence': occurrence.id, title: entity ? entity.name : 'World entry unavailable' }));
+        }
+      }
       state.doc.descendants((node, pos) => {
         if (node.type !== schema.nodes.screenplay_element) return true;
         for (const match of matches.get(node.attrs.elementId) ?? []) {
@@ -276,7 +294,21 @@ export function ContinuousScreenplayEditor({ screenplay, notesVisible = true, se
         return false;
       });
       return DecorationSet.create(state.doc, decorations);
-    } } }), locked, shortcuts, keymap(baseKeymap), new Plugin({ props: { decorations(state) { return paginationDecorations(state.doc, pagination.current.pages, pagination.current.layout, pagination.current.physicalPages); } } })] }), nodeViews: { screenplay_element: elementNodeView }, dispatchTransaction(transaction) { const selectionChanged = !transaction.selection.eq(view.state.selection); const nextState = view.state.apply(transaction); const documentChanged = !nextState.doc.eq(view.state.doc); view.updateState(nextState); if (notesVisibleRef.current) requestAnimationFrame(() => stackMarginNotes(host.current)); if (selectionChanged && !transaction.getMeta("search-selection")) queueMicrotask(() => { if (!view.isDestroyed) view.focus(); }); if (selectionChanged && !transaction.getMeta("search-selection")) setNoteSelection(notesVisibleRef.current ? noteSelectionForState(nextState, view) : null); if (documentChanged) onChange(continuousDocumentToScreenplay(latest.current, nextState.doc, sceneIds ?? (sceneId ? [sceneId] : latest.current.scenes.map(scene => scene.id))), transaction.getMeta("clipboard-operation") ? undefined : "continuous-document"); const activeSceneNode = nextState.selection.$head.depth >= 1 ? nextState.selection.$head.node(1) : null; if (activeSceneNode?.attrs.sceneId) window.dispatchEvent(new CustomEvent("screenplay-scene-focus", { detail: activeSceneNode.attrs.sceneId })); const block = selectedBlock(nextState); if (!nextState.selection.empty || !block) setOverlay(null); if (block && nextState.selection.empty) { const type = block.attrs.type as ScreenplayElementType; const entered = block.textContent.trim().toUpperCase(); const values = smartTypeSuggestions(latest.current, type, block.textContent, block.attrs.elementId).filter((value) => value !== entered); positionOverlay(nextState.selection.from); setOverlay(values.length ? { kind: 'suggestions', elementId: block.attrs.elementId, type, values, index: 0 } : null); window.dispatchEvent(new CustomEvent("screenplay-element-focus", { detail: { id: block.attrs.elementId, type } })); } } }); viewRef.current = view;
+    } } }), locked, shortcuts, keymap(baseKeymap), new Plugin({ props: { decorations(state) { return paginationDecorations(state.doc, pagination.current.pages, pagination.current.layout, pagination.current.physicalPages); } } })] }), nodeViews: { screenplay_element: elementNodeView }, dispatchTransaction(transaction) { const previousDoc = view.state.doc; const nextState = view.state.apply(transaction); const documentChanged = !nextState.doc.eq(previousDoc); if (documentChanged) {
+      const anchorPosition = (doc: PMNode, anchor: { elementId: string; offset: number } | undefined) => { if (!anchor) return undefined; let result: number | undefined; doc.descendants((node, pos) => { if (node.type === schema.nodes.screenplay_element && node.attrs.elementId === anchor.elementId && anchor.offset <= node.content.size) result = pos + 1 + anchor.offset; }); return result; };
+      const anchorAt = (doc: PMNode, pos: number) => { const resolved = doc.resolve(Math.max(0, Math.min(pos, doc.content.size))); for (let depth = resolved.depth; depth > 0; depth--) { const node = resolved.node(depth); if (node.type === schema.nodes.screenplay_element) return { elementId: node.attrs.elementId as string, offset: pos - resolved.start(depth) }; } return undefined; };
+      const updates: WorldOccurrence[] = [];
+      for (const occurrence of worldRef.current?.worldOccurrences ?? []) {
+        if (occurrence.screenplayId !== latest.current.id || occurrence.scope !== 'text') continue;
+        const from = anchorPosition(view.state.doc, occurrence.from), to = anchorPosition(view.state.doc, occurrence.to);
+        if (from === undefined || to === undefined) continue;
+        const a = transaction.mapping.mapResult(from, 1), b = transaction.mapping.mapResult(to, -1);
+        const newFrom = a.deleted ? undefined : anchorAt(transaction.doc, a.pos), newTo = b.deleted ? undefined : anchorAt(transaction.doc, b.pos);
+        if ((a.deleted || b.deleted) && !occurrence.needsReview) { updates.push({ ...occurrence, needsReview: true }); continue; }
+        if (newFrom && newTo && (newFrom.elementId !== occurrence.from?.elementId || newFrom.offset !== occurrence.from?.offset || newTo.elementId !== occurrence.to?.elementId || newTo.offset !== occurrence.to?.offset)) updates.push({ ...occurrence, from: newFrom, to: newTo });
+      }
+      if (updates.length) window.dispatchEvent(new CustomEvent('world-occurrences-remapped', { detail: updates }));
+    } const selectionChanged = !nextState.selection.eq(view.state.selection); view.updateState(nextState); if (notesVisibleRef.current) requestAnimationFrame(() => stackMarginNotes(host.current)); if (selectionChanged && !transaction.getMeta("search-selection")) queueMicrotask(() => { if (!view.isDestroyed) view.focus(); }); if (selectionChanged && !transaction.getMeta("search-selection")) setNoteSelection(notesVisibleRef.current ? noteSelectionForState(nextState, view) : null); if (documentChanged) onChange(continuousDocumentToScreenplay(latest.current, nextState.doc, sceneIds ?? (sceneId ? [sceneId] : latest.current.scenes.map(scene => scene.id))), transaction.getMeta("clipboard-operation") ? undefined : "continuous-document"); const activeSceneNode = nextState.selection.$head.depth >= 1 ? nextState.selection.$head.node(1) : null; if (activeSceneNode?.attrs.sceneId) window.dispatchEvent(new CustomEvent("screenplay-scene-focus", { detail: activeSceneNode.attrs.sceneId })); const block = selectedBlock(nextState); if (!nextState.selection.empty || !block) setOverlay(null); if (block && nextState.selection.empty) { const type = block.attrs.type as ScreenplayElementType; const entered = block.textContent.trim().toUpperCase(); const values = smartTypeSuggestions(latest.current, type, block.textContent, block.attrs.elementId).filter((value) => value !== entered); positionOverlay(nextState.selection.from); setOverlay(values.length ? { kind: 'suggestions', elementId: block.attrs.elementId, type, values, index: 0 } : null); window.dispatchEvent(new CustomEvent("screenplay-element-focus", { detail: { id: block.attrs.elementId, type } })); } } }); viewRef.current = view;
     const structuralKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey) {
         const key = event.key.toLowerCase();
@@ -417,7 +449,29 @@ export function ContinuousScreenplayEditor({ screenplay, notesVisible = true, se
       }
     };
     const removeClipboard = installScreenplayClipboard(view, () => pagination.current.layout, setClipboardError);
-    window.addEventListener("screenplay-format", format); window.addEventListener("screenplay-element-type", chooseElementType); document.addEventListener('pointerdown', pointer, true); document.addEventListener('click', sceneControlClick, true); document.addEventListener("keydown", syncBeforeStructuralKey, true); view.dom.addEventListener("keydown", structuralKey, true); return () => { window.removeEventListener("screenplay-format", format); window.removeEventListener("screenplay-element-type", chooseElementType); document.removeEventListener('pointerdown', pointer, true); document.removeEventListener('click', sceneControlClick, true); document.removeEventListener("keydown", syncBeforeStructuralKey, true); removeClipboard(); view.dom.removeEventListener("keydown", structuralKey, true); viewRef.current = null; view.destroy(); };
+    const worldContext = (event: MouseEvent) => {
+      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-element-id]'); if (!target) return;
+      event.preventDefault();
+      const selection = noteSelectionForState(view.state, view);
+      const element = latest.current.scenes.flatMap(s => s.elements).find(e => e.id === target.dataset.elementId);
+      const detail = { screenplayId: latest.current.id, sceneId: selection?.sceneId ?? target.dataset.sceneId, type: element?.type ?? 'action', ...(selection ? { from: selection.from, to: selection.to, selectedText: selection.selectedText } : {}), x: event.clientX, y: event.clientY };
+      window.dispatchEvent(new CustomEvent('world-link-context', { detail }));
+    };
+    const worldInsert = (event: Event) => {
+      const { text, type } = (event as CustomEvent<{ text: string; type: ScreenplayElementType }>).detail;
+      const block = selectedBlock(view.state);
+      if (!block || !text || block.attrs.locked || view.state.selection.$from.node(1).attrs.locked) { window.dispatchEvent(new CustomEvent('world-insert-result', { detail: 'Select an unlocked screenplay element first.' })); return; }
+      if (type === 'dialogue' && block.attrs.type !== 'dialogue') { window.dispatchEvent(new CustomEvent('world-insert-result', { detail: 'Place the screenplay cursor in Dialogue. No speaker has been guessed.' })); return; }
+      let transaction = view.state.tr;
+      if (block.attrs.type === type) transaction = transaction.insertText(text, view.state.selection.from, view.state.selection.from);
+      else { const pos = view.state.selection.$from.after(view.state.selection.$from.depth); const node = schema.nodes.screenplay_element.create({ elementId: crypto.randomUUID(), sceneId: block.attrs.sceneId, type }, text.split(/(\n)/).filter(Boolean).map(part => part === '\n' ? schema.nodes.hard_break.create() : schema.text(part))); transaction = transaction.insert(pos, node).setSelection(TextSelection.create(transaction.doc, pos + 1 + node.content.size)); }
+      view.dispatch(transaction); window.dispatchEvent(new CustomEvent('world-insert-result', { detail: 'Wording added to the screenplay.' }));
+    };
+    const worldNavigate = (event: Event) => { const occurrence = (event as CustomEvent<WorldOccurrence>).detail; if (occurrence.screenplayId !== latest.current.id || !occurrence.from) return; let position: number | undefined; view.state.doc.descendants((node, pos) => { if (node.type === schema.nodes.screenplay_element && node.attrs.elementId === occurrence.from?.elementId) position = pos + 1 + Math.min(occurrence.from!.offset, node.content.size); }); if (position !== undefined) { view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, position)).scrollIntoView()); view.focus(); } };
+    view.dom.addEventListener('contextmenu', worldContext);
+    window.addEventListener('world-insert-text', worldInsert);
+    window.addEventListener('world-navigate-occurrence', worldNavigate);
+    window.addEventListener("screenplay-format", format); window.addEventListener("screenplay-element-type", chooseElementType); document.addEventListener('pointerdown', pointer, true); document.addEventListener('click', sceneControlClick, true); document.addEventListener("keydown", syncBeforeStructuralKey, true); view.dom.addEventListener("keydown", structuralKey, true); return () => { view.dom.removeEventListener('contextmenu', worldContext); window.removeEventListener('world-insert-text', worldInsert); window.removeEventListener('world-navigate-occurrence', worldNavigate); window.removeEventListener("screenplay-format", format); window.removeEventListener("screenplay-element-type", chooseElementType); document.removeEventListener('pointerdown', pointer, true); document.removeEventListener('click', sceneControlClick, true); document.removeEventListener("keydown", syncBeforeStructuralKey, true); removeClipboard(); view.dom.removeEventListener("keydown", structuralKey, true); viewRef.current = null; view.destroy(); };
   }, [screenplay.id, sceneId, visibleSceneKey]);
   useEffect(() => {
     const previous = previousPresentation.current;

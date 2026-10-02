@@ -53,8 +53,11 @@ describe('shared story model', () => {
     expect(clean.events).toHaveLength(1); expect(clean.scenes).toHaveLength(1);
     expect(clean.scenes[0].plotIds).toEqual(['b']); expect(clean.scenes[0].presentIds).toEqual(['zider']);
     const removed = { ...screenplay, scenes: screenplay.scenes.slice(1) };
-    expect(queryTimeline(story, [removed]).find(item => item.id === screenplay.scenes[0].id)?.missingScene).toBe(true);
-    expect(queryTimeline(story, [removed]).find(item => item.id === 'death')?.sceneId).toBe(screenplay.scenes[0].id);
+    expect(queryTimeline(story, [removed], { includeRemovedScenes: true }).find(item => item.id === screenplay.scenes[0].id)?.missingScene).toBe(true);
+    expect(queryTimeline(story, [removed]).some(item => item.id === screenplay.scenes[0].id)).toBe(false);
+    expect(queryTimeline(story, [removed]).find(item => item.id === 'death')?.sceneId).toBeUndefined();
+    expect(queryTimeline(story, [removed]).find(item => item.id === 'death')?.chronology).toEqual({ day: 2 });
+    expect(story.events[0].occursInSceneId).toBe(screenplay.scenes[0].id);
     story.plots[0].archived = true;
     expect(queryTimeline(story, [screenplay], { plotIds: ['a'] })).toHaveLength(1);
   });

@@ -71,7 +71,7 @@ describe('story refinement safety', () => {
     story.scenes[0].referencedIds = [story.characters[1].id];
     expect(queryTimeline(story, [script], { characterIds: story.characters.map(item => item.id), allCharacters: true, relationship: 'all' })).toEqual([]);
   });
-  it('derives scene plots from occurs and revealed events without reverse inference or duplicate writeback', () => {
+  it('derives scene plots from typed event relationships without reverse inference or duplicate writeback', () => {
     const { story, script } = fixture();
     story.plots.push({ id: 'relationship', name: 'Relationship', description: '', color: 'accent' }, { id: 'reference-only', name: 'Reference only', description: '', color: 'accent' });
     story.events.push(
@@ -82,7 +82,7 @@ describe('story refinement safety', () => {
     const first = getEffectivePlotsForScene(story, script.scenes[0].id);
     expect(first.map(item => item.plotId).sort()).toEqual(['plot', 'relationship']);
     expect(first.find(item => item.plotId === 'plot')?.sources.map(item => item.type).sort()).toEqual(['event', 'explicit']);
-    expect(getEffectivePlotsForScene(story, script.scenes[1].id).map(item => item.plotId)).toEqual(['relationship']);
+    expect(getEffectivePlotsForScene(story, script.scenes[1].id).map(item => item.plotId)).toEqual(['relationship', 'reference-only']);
     expect(getEventsForScene(story, script.scenes[1].id)).toMatchObject({ occurs: [], revealed: [{ relationship: 'revealed' }], referenced: [{ relationship: 'referenced' }] });
     expect(getEventsForPlot(story, 'relationship').map(item => item.id)).toEqual(['occurs', 'revealed']);
     expect(getEffectiveScenesForPlot(story, 'relationship').map(item => item.sceneId).sort()).toEqual(script.scenes.map(item => item.id).sort());

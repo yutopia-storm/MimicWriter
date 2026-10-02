@@ -94,6 +94,9 @@ function registerIpc() {
   ipcMain.handle('collections:reorder-project', async (_event, value: any) => (await requireRepository()).reorderCollectionProject(value.collectionId, value.projectId, value.targetIndex));
   ipcMain.handle('assets:import-image', async (_event, value: { projectId: string; dataUrl: string }) => (await requireRepository()).importProjectImage(z.string().uuid().parse(value.projectId), z.string().parse(value.dataUrl)));
   ipcMain.handle('assets:read-image', async (_event, value: { projectId: string; assetId: string }) => (await requireRepository()).readProjectImage(z.string().uuid().parse(value.projectId), z.string().uuid().parse(value.assetId)));
+  ipcMain.handle('worlds:delete', async (_event, id) => (await requireRepository()).deleteLibraryWorld(id));
+  ipcMain.handle('worlds:list', async () => (await requireRepository()).listWorldLibrary());
+  ipcMain.handle('worlds:save', async (_event, value) => (await requireRepository()).saveLibraryWorld(value));
   ipcMain.handle('story:save', async (_event, value: any) => {
     const projectId = z.string().uuid().parse(value?.projectId);
     return (await requireRepository()).saveStory(projectId, value.story);

@@ -29,6 +29,9 @@ export interface UserPreferences {
   compactLibrary: boolean;
   spellingLanguage: 'en-GB' | 'en-US';
   profiles?: import('./profiles').ProfilePreferences;
+  timelineDisplay?: 'icons_names' | 'names';
+  timelineOrder?: 'story' | 'screenplay' | 'compare';
+  timelineDensity?: 'compact' | 'standard' | 'expanded';
 }
 
 export interface AppState {
@@ -139,6 +142,9 @@ export interface BootstrapData {
 }
 
 export interface DesktopApi {
+  deleteLibraryWorld(id: string): Promise<void>;
+  listWorldLibrary(): Promise<import('./worlds').WorldPackage[]>;
+  saveLibraryWorld(value: import('./worlds').WorldPackage): Promise<import('./worlds').WorldPackage>;
   importProjectImage(projectId: string, dataUrl: string): Promise<string>;
   readProjectImage(projectId: string, assetId: string): Promise<string>;
   preferClipboardEvents?: boolean;

@@ -1,5 +1,5 @@
-// Theme roles are the default palette; writers may choose a custom colour per plot.
-export const STORY_COLORS = ['accent', 'text', 'muted', 'danger'] as const;
+// Central Plot palette; theme roles and existing custom colours remain compatible.
+export const STORY_COLORS = ['accent', '#2563eb', '#16a34a', '#9333ea', '#ea580c', '#dc2626', '#0891b2', '#db2777'] as const;
 export const STORY_TIME_PERIODS = [
   { value: 'early_morning', label: 'Early Morning', sortMinute: 300, headings: ['EARLY MORNING', 'DAWN', 'SUNRISE'] },
   { value: 'morning', label: 'Morning', sortMinute: 540, headings: ['MORNING'] },
@@ -23,5 +23,12 @@ export function periodFromTime(time: string) {
 }
 export const STORY_SECONDS_PER_PAGE = 60;
 export function storyColor(color: string) {
-  return /^#[0-9a-f]{6}$/i.test(color) ? color : `var(--${STORY_COLORS.includes(color as typeof STORY_COLORS[number]) ? color : 'accent'})`;
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : `var(--${[...STORY_COLORS, 'text', 'muted', 'danger'].includes(color) ? color : 'accent'})`;
 }
+
+export const EVENT_RELATIONSHIPS = { occurs: 'Occurs', revealed: 'Revealed', referenced: 'Referenced', investigated: 'Investigated', new_evidence: 'New evidence', reinterpreted: 'Reinterpreted' } as const;
+export const PLOT_RELATIONSHIPS = ['Introduced', 'Developed', 'Complicated', 'Revealed', 'Resolved'] as const;
+export const CHARACTER_RELATIONSHIPS = ['First appearance', 'Appears', 'Mentioned', 'Last appearance'] as const;
+export const LOCATION_RELATIONSHIPS = ['First appearance', 'Appears', 'Referenced'] as const;
+
+export function nextPlotColor(plots: { color: string }[]) { return STORY_COLORS.find(color => !plots.some(plot => plot.color === color)) ?? STORY_COLORS[plots.length % STORY_COLORS.length]; }

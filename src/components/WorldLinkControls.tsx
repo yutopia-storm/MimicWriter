@@ -1,0 +1,37 @@
+import { useState } from 'react';
+import type { StoryRecord } from '../shared/story';
+import type { ScreenplayRecord } from '../shared/models';
+import type { WorldKind, WorldRecord, WorldRef, WorldRelationship, WorldPoint } from '../shared/worlds';
+import { WORLD_CHARACTER_LINKS, WORLD_LINK_LABELS } from '../shared/world-forms';
+import { refKey, relationshipAt } from '../domain/worlds';
+import { structureParents } from '../domain/world-structure';
+
+export function WorldSearchSelect({label,value,options,onChange,empty='Choose…'}:{label:string;value:string;options:{value:string;label:string}[];onChange(v:string):void;empty?:string}){
+ const [search,setSearch]=useState('');return <div className="world-search-select">{options.length>12&&<label>Search {label.toLowerCase()}<input value={search} onChange={e=>setSearch(e.target.value)}/></label>}<label>{label}<select aria-label={label} value={value} onChange={e=>{onChange(e.target.value);setSearch('');}}><option value="">{empty}</option>{options.filter(o=>o.value===value||o.label.toLowerCase().includes(search.toLowerCase())).map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label></div>;
+}
+export function OrganisationPicker({world,story,documents,at,value,onChange}:{world:WorldRecord;story:StoryRecord;documents:ScreenplayRecord[];at?:WorldPoint;value:string;onChange(id:string):void}){
+ const orgs=world.entities.filter(e=>e.kind==='organisation');
+ const links=world.relationships.filter(r=>r.type==='part of'&&r.from.kind==='organisation'&&r.to.kind==='organisation'&&relationshipAt(r,at,story,documents)==='active');
+ const path:string[]=[];let current=value;while(current&&!path.includes(current)){path.unshift(current);current=links.find(r=>r.from.id===current)?.to.id??'';}
+ const roots=orgs.filter(e=>(!e.archived||path.includes(e.id))&&!links.some(r=>r.from.id===e.id));
+ return <div className="world-organisation-path"><WorldSearchSelect label="Organisation" value={path[0]?'organisation:'+path[0]:''} options={roots.map(e=>({value:'organisation:'+e.id,label:e.name}))} empty="Choose Organisation…" onChange={v=>onChange(v.replace(/^organisation:/,''))}/>{path.map((id,index)=>{const children=orgs.filter(e=>(!e.archived||path.includes(e.id))&&links.some(r=>r.from.id===e.id&&r.to.id===id));return children.length?<WorldSearchSelect key={id} label={'Organisation within '+(orgs.find(e=>e.id===id)?.name??'Organisation')} value={path[index+1]??''} options={children.map(e=>({value:e.id,label:e.name}))} empty={'Use '+(orgs.find(e=>e.id===id)?.name??'this Organisation')} onChange={v=>onChange(v||id)}/>:null;})}</div>;
+}
+export function UnitPicker({world,story,documents,at,organisationId,value,onChange}:{world:WorldRecord;story:StoryRecord;documents:ScreenplayRecord[];at?:WorldPoint;organisationId:string;value?:string;onChange(id?:string):void}){
+ const units=world.entities.filter(e=>e.kind==='structure'&&e.organisationId===organisationId&&(!e.archived||e.id===value)),parents=structureParents(world,story,documents,at);
+ const path:string[]=[];let current=value??'';while(current&&!path.includes(current)){path.unshift(current);current=parents.get(current)?.find(p=>p.kind==='structure')?.id??'';}
+ const root=units.filter(e=>!parents.get(e.id)?.some(p=>p.kind==='structure'&&units.some(u=>u.id===p.id)));
+ return <div className="world-unit-path"><WorldSearchSelect label="Internal unit" value={path[0]??''} options={root.map(e=>({value:e.id,label:e.name+' · '+(e.structureType??'Unit')}))} empty="Organisation-wide / no unit" onChange={v=>onChange(v||undefined)}/>{path.map((id,index)=>{const children=units.filter(e=>parents.get(e.id)?.some(p=>p.kind==='structure'&&p.id===id));return children.length?<WorldSearchSelect key={id} label={'Unit within '+(units.find(e=>e.id===id)?.name??'unit')} value={path[index+1]??''} options={children.map(e=>({value:e.id,label:e.name+' · '+(e.structureType??'Unit')}))} empty="Use this unit" onChange={v=>onChange(v||id)}/>:null;})}</div>;
+}
+export function contextualTypes(kind:WorldKind,target:WorldKind,world:WorldRecord,organisationId?:string){
+ const base=kind==='note'?['about']:target==='character'?(WORLD_CHARACTER_LINKS[kind]??['related to']):target==='organisation'?(kind==='organisation'?['part of','related to']:kind==='character'?['member of']:['belongs to','issued by','related to']):target==='location'?['stored at','based at','related to']:['related to'];
+ return [...new Set([...base,...target==='character'&&organisationId?world.entities.filter(e=>e.kind==='position'&&e.organisationId===organisationId&&!e.archived).map(e=>e.name):[],...world.relationshipOptions?.filter(o=>o.sourceKind===kind&&o.targetKind===target).map(o=>o.label)??[]])];
+}
+export function ContextLinkFields({world,story,documents,selected,draft,onChange,at}:{world:WorldRecord;story:StoryRecord;documents:ScreenplayRecord[];selected:WorldRef;draft:WorldRelationship;onChange(r:WorldRelationship):void;at?:WorldPoint}){
+ const other=refKey(draft.from)===refKey(selected)?draft.to:draft.from;
+ const [custom,setCustom]=useState(false);
+ const ownerId=world.entities.find(e=>e.id===selected.id)?.organisationId??world.relationships.find(r=>r.from.id===selected.id&&r.to.kind==='organisation'&&relationshipAt(r,at,story,documents)==='active')?.to.id;
+ const types=contextualTypes(draft.from.kind,draft.to.kind,world,ownerId);
+ const all=other.kind==='character'?story.characters:other.kind==='location'?story.locations:world.entities.filter(e=>other.kind==='organisation'?e.kind==='organisation':!['rank','position','structure'].includes(e.kind));
+ return <>{other.kind==='organisation'?<><OrganisationPicker world={world} story={story} documents={documents} at={at} value={other.id} onChange={id=>{const target={kind:'organisation' as const,id};onChange({...draft,...refKey(draft.from)===refKey(selected)?{to:target}:{from:target},unitId:undefined});}}/>{other.id&&<UnitPicker world={world} story={story} documents={documents} at={at} organisationId={other.id} value={draft.unitId} onChange={unitId=>onChange({...draft,unitId})}/>}</>:<WorldSearchSelect label={other.kind==='character'?'Character':other.kind==='location'?'Place':'World item'} value={other.id} options={all.filter(e=>!e.archived||e.id===other.id).filter(e=>e.id!==selected.id).map(e=>({value:e.id,label:e.name}))} onChange={id=>{const item=all.find(e=>e.id===id);const target={kind:other.kind==='character'||other.kind==='location'?other.kind:(item as {kind?:WorldKind})?.kind??other.kind,id};const forward=refKey(draft.from)===refKey(selected);const next={...draft,...forward?{to:target}:{from:target}};if(draft.type==='related to')next.type=contextualTypes(next.from.kind,next.to.kind,world,ownerId)[0]??draft.type;onChange(next);}}/>}<label>Relationship<select aria-label="Relationship" value={custom?'__custom':draft.type} onChange={e=>{if(e.target.value==='__custom'){setCustom(true);onChange({...draft,type:''});}else{setCustom(false);onChange({...draft,type:e.target.value});}}}>{[...new Set([...types,...draft.type?[draft.type]:[]])].map(type=><option key={type} value={type}>{WORLD_LINK_LABELS[type]?.[refKey(draft.from)===refKey(selected)?0:1]??type}</option>)}<option value="__custom">Other / Add relationship…</option></select></label>{custom&&<label>Relationship name<input value={draft.type} onChange={e=>onChange({...draft,type:e.target.value})}/></label>}</>;
+}
+export function relationshipLabel(r:WorldRelationship,selected:WorldRef){return WORLD_LINK_LABELS[r.type]?.[refKey(r.from)===refKey(selected)?0:1]??r.type;}

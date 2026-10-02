@@ -93,7 +93,7 @@ describe('scene-derived story defaults', () => {
     story = synchronizeSceneDefaults(story, [document]);
     expect(story.scenes[0].chronology).toMatchObject({ timeOfDay: 'evening', duration: .5 });
     expect(story.scenes[0].presentIds).toEqual([]);
-    expect(story.scenes[0].locationId).toBeUndefined();
+    expect(story.locations.find(item => item.id === story.scenes[0].locationId)?.name).toBe('HOUSE');
     expect(story.characters.filter(item => item.sourceNames?.includes('APPLE'))).toHaveLength(1);
     expect(story.characters.find(item => item.id === apple.id)?.name).toBe('Apple renamed');
     story = synchronizeSceneDefaults(deleteStoryEntity(story, 'characters', apple.id), [document]);
@@ -135,3 +135,16 @@ describe('scene-derived story defaults', () => {
   });
 });
 
+
+ it('preserves explicit event location identity when its original scene heading changes place', () => {
+ const document=fixture();
+ let story=synchronizeSceneDefaults(migrateStory(null,'p'),[document]);
+ const locationId=story.scenes[0].locationId!;
+ story.events=[{id:'inherited',name:'Inherited',description:'',contextOverrides:[],occursInSceneId:document.scenes[0].id},{id:'explicit',name:'Explicit',description:'',contextOverrides:['locationId'],locationId,occursInSceneId:document.scenes[0].id}];
+ document.scenes[0].elements[0].content='INT. HOUSE - NIGHT';
+ story=synchronizeSceneDefaults(story,[document]);
+ expect(story.locations.find(l=>l.id===locationId)?.name).toBe('HOSPITAL');
+ expect(story.scenes[0].locationId).not.toBe(locationId);
+ expect(story.events.find(e=>e.id==='explicit')?.locationId).toBe(locationId);
+ expect(migrateStory(JSON.parse(JSON.stringify(story)),'p').events).toHaveLength(2);
+ });

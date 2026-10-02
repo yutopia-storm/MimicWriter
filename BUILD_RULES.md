@@ -1,5 +1,9 @@
 Build Rules
 
+User-facing language
+
+Use plain, friendly language throughout the interface, including labels, help text, confirmations and errors. Explain outcomes in the writer’s terms. Avoid implementation terms such as canonical, metadata, provenance, temporal boundary or exclusive, and shorthand such as “blank = Current”. Keep internal data identifiers unchanged when improving interface wording.
+
 1. Scope
 
 Implement only the requested build.

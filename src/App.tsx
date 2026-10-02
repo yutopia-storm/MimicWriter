@@ -1,9 +1,11 @@
+import { WorldWorkspace } from './components/WorldWorkspace';
+import { migrateStory } from './domain/story';
 import { useEffect, useState } from 'react';
 import { Archive, ArrowLeft, BookOpen, Check, ChevronRight, CircleAlert, Folder, FolderCog, LayoutGrid, Plus, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import type { BootstrapData, OwnerConfig, ProjectCollection, ProjectRecord, ProjectType, ProjectWorkspace, UserPreferences } from './shared/models';
 import { ScreenplayWorkspaceView } from './components/ScreenplayWorkspace';
 
-type View = 'library' | 'settings' | 'admin' | 'project';
+type View = 'library' | 'settings' | 'admin' | 'project' | 'worlds';
 
 function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
@@ -23,7 +25,7 @@ function App() {
       <button className="wordmark" onClick={() => navigate('library')}><span className="brand-mark">{data.ownerConfig.brand.shortName.slice(0, 2)}</span><span><b>{data.ownerConfig.brand.productName}</b><small>STORY WORKSPACE</small></span></button>
       <nav>
         <NavButton active={view === 'library'} icon={<LayoutGrid/>} label={`${term('project')} Library`} onClick={() => navigate('library')}/>
-        <div className="nav-spacer"/>
+        <NavButton active={view === 'worlds'} icon={<BookOpen/>} label="World Library" onClick={() => navigate('worlds')}/><div className="nav-spacer"/>
         <NavButton active={view === 'settings'} icon={<Settings/>} label="Settings" onClick={() => navigate('settings')}/>
         <NavButton active={view === 'admin'} icon={<SlidersHorizontal/>} label="Owner Admin" onClick={() => navigate('admin')}/>
       </nav>
@@ -32,6 +34,7 @@ function App() {
     <main className="main-panel">
       {error && <Toast message={error} onClose={() => setError('')}/>} 
       {view === 'library' && <Library data={data} term={term} onData={setData} onOpen={async (project) => { try { setActiveWorkspace(await window.desktop.openWorkspace(project.id)); setView('project'); } catch (e) { setError((e as Error).message); } }} setError={setError}/>} 
+      {view === 'worlds' && <WorldWorkspace libraryOnly story={migrateStory(null, 'world-library')} documents={[]} change={() => {}} navigateScene={() => {}} status="Library" error="" retry={() => {}} onCloseLibrary={() => navigate('library')} />}
       {view === 'settings' && <WriterSettings data={data} onData={setData} setError={setError}/>} 
       {view === 'admin' && <Admin data={data} onData={setData} setError={setError}/>} 
       {view === 'project' && activeWorkspace && <ScreenplayWorkspaceView initialWorkspace={activeWorkspace} term={term} onWorkspace={setActiveWorkspace} onBack={() => navigate('library')}/>} 

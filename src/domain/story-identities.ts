@@ -70,6 +70,19 @@ export function mergeIdentity(story: StoryRecord, kind: IdentityMerge['kind'], s
   };
   for (const scene of next.scenes) { replace(scene, 'scene', scene.sceneId, true); if (scene.derived) replace(scene.derived, 'scene', scene.sceneId, false); }
   for (const event of next.events) replace(event, 'event', event.id, true);
+  const worldKind = kind === 'characters' ? 'character' : 'location';
+  record.worldLinks = [];
+  for (const world of next.worlds ?? []) {
+    const key = kind === 'characters' ? 'characterIds' : 'locationIds';
+    if (world[key].includes(sourceId)) { record.worldLinks.push({ worldId: world.id, type: 'member', targetHad: world[key].includes(targetId) }); world[key] = unique(world[key].map(id => id === sourceId ? targetId : id)); }
+    for (const owner of world.entities) for (const [field,ref] of Object.entries(owner.fieldLinks ?? {})) if (ref.kind === worldKind && ref.id === sourceId) { record.worldLinks.push({ worldId: world.id, type: 'field', id: owner.id, field }); ref.id = targetId; }
+    for (const relationship of world.relationships) {
+      for (const field of ['from', 'to'] as const) if (relationship[field].kind === worldKind && relationship[field].id === sourceId) { record.worldLinks.push({ worldId: world.id, type: field, id: relationship.id }); relationship[field].id = targetId; }
+      if (kind === 'characters' && relationship.reportsToIds?.includes(sourceId)) { record.worldLinks.push({worldId:world.id,type:'reportsToMany',id:relationship.id,targetHad:relationship.reportsToIds.includes(targetId)}); relationship.reportsToIds=unique(relationship.reportsToIds.map(id=>id===sourceId?targetId:id)); }
+      if (kind === 'characters' && relationship.reportsToId === sourceId) { record.worldLinks.push({ worldId: world.id, type: 'reportsTo', id: relationship.id }); relationship.reportsToId = targetId; }
+    }
+  }
+  for (const occurrence of next.worldOccurrences ?? []) if (occurrence.entity.kind === worldKind && occurrence.entity.id === sourceId) { record.worldLinks.push({ worldId: occurrence.worldId, type: 'occurrence', id: occurrence.id }); occurrence.entity.id = targetId; }
   target.sourceNames = unique([...aliases(target), ...aliases(source)]);
   target.sourceElementIds = unique([...target.sourceElementIds ?? [], ...source.sourceElementIds ?? []]);
   for (const item of next[kind]) if (item.parentId === sourceId) item.parentId = item.id === targetId ? source.parentId : targetId;
@@ -101,6 +114,13 @@ export function separateIdentity(story: StoryRecord, kind: IdentityMerge['kind']
   target.sourceElementIds = target.sourceElementIds?.filter(id => !sourceElements.has(id));
   if (source.parentId && !next[kind].some(item => item.id === source.parentId)) source.parentId = undefined;
   next[kind].push(source);
+  for (const link of history?.worldLinks ?? []) {
+    if (link.type === 'occurrence') { const o = next.worldOccurrences?.find(o => o.id === link.id); if (o?.entity.id === targetId) o.entity.id = source.id; continue; }
+    const world = next.worlds?.find(w => w.id === link.worldId); if (!world) continue;
+    if (link.type === 'field') { const ref = link.field ? world.entities.find(e => e.id === link.id)?.fieldLinks?.[link.field] : undefined; if (ref?.id === targetId) ref.id = source.id; continue; }
+    if (link.type === 'member') { const key = kind === 'characters' ? 'characterIds' : 'locationIds'; if (world[key].includes(targetId)) world[key] = unique([...world[key].filter(id => link.targetHad || id !== targetId), source.id]); }
+    else { const r = world.relationships.find(r => r.id === link.id); if (!r) continue; if (link.type === 'reportsToMany') { if(r.reportsToIds?.includes(targetId)) r.reportsToIds=unique([...r.reportsToIds.filter(id=>link.targetHad||id!==targetId),source.id]); } else if (link.type === 'reportsTo') { if (r.reportsToId === targetId) r.reportsToId = source.id; } else if (r[link.type].id === targetId) r[link.type].id = source.id; }
+  }
   for (const original of history?.relationships ?? []) {
     const relation = next.relationships?.find(item => item.id === original.id);
     if (!relation) continue;

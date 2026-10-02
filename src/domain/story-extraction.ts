@@ -83,7 +83,7 @@ export function synchronizeSceneDefaults(story: StoryRecord, documents: Screenpl
       const bound = next[kind].find(item => item.sourceElementIds?.includes(sourceId));
       // A single cue/heading being typed keeps its ID instead of creating partial-name entities.
       // A changed cue amongst other unchanged cues instead creates/reuses the new character.
-      if (bound && !bound.sourceElementIds?.some(id => id !== sourceId && sourceNames.has(id) && sourceNames.get(id) !== key)) {
+      if (bound && !(kind === 'locations' && next.events.some(event => event.locationId === bound.id && (!event.contextOverrides || event.contextOverrides.includes('locationId')))) && !bound.sourceElementIds?.some(id => id !== sourceId && sourceNames.has(id) && sourceNames.get(id) !== key)) {
         entity = bound;
         if ((entity.sourceNames?.length ?? 0) <= 1 && entity.sourceNames?.includes(canonical(entity.name))) {
           entity.name = name.trim();
@@ -157,7 +157,7 @@ export function synchronizeSceneDefaults(story: StoryRecord, documents: Screenpl
       const link: SceneStory = existing ?? { sceneId: scene.id, screenplayId: document.id };
       const managed = (path: string, current: unknown, previous: unknown) => !link.manualFields?.includes(path) && (current === undefined || same(current, previous));
       for (const field of ['presentIds', 'involvedIds', 'remoteIds', 'referencedIds', 'locationId'] as const) {
-        if (field !== 'involvedIds' && managed(field, link[field], link.derived?.[field])) Object.assign(link, { [field]: extractedLinks[field] });
+        if (field === 'locationId' || field !== 'involvedIds' && managed(field, link[field], link.derived?.[field])) Object.assign(link, { [field]: extractedLinks[field] });
       }
       const chronology = { ...link.chronology };
       for (const field of ['timeOfDay', 'time', 'duration', 'type'] as const) {

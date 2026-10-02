@@ -1,7 +1,10 @@
+export type PlotEffect = typeof import('./story-config').PLOT_RELATIONSHIPS[number];
+
 export interface Chronology {
   day?: number;
   date?: string;
   time?: string;
+  endTime?: string;
   timeOfDay?: 'early_morning' | 'morning' | 'midday' | 'afternoon' | 'evening' | 'night' | 'late_night';
   position?: number;
   type?: 'present' | 'past' | 'future' | 'linear' | 'flashback' | 'flashforward' | 'parallel' | 'unknown';
@@ -30,13 +33,22 @@ export interface SceneStory extends StoryLinks {
   /** Last scene-derived values; fields edited by the writer are no longer managed. */
   derived?: StoryLinks;
   manualFields?: string[];
+  /** Effect on each explicit Scene-to-Plot link; inherited Event effects stay Event-owned. */
+  plotRoles?: Record<string, string>;
+  /** Retained legacy Track labels for recovery; current Tracks derives presence/references. */
+  characterRoles?: Record<string, string>;
+  locationRoles?: Record<string, string>;
 }
 export interface StoryEvent extends StoryEntity, StoryLinks {
+  /** Effect owned by each existing Event-to-Plot link, keyed by Plot ID. */
+  plotEffects?: Record<string, PlotEffect>;
+  occurrenceTiming?: { mode: "inherit" | "exact" | "range" | "duration" | "approximate"; time?: string; endTime?: string; duration?: number; timeOfDay?: Chronology["timeOfDay"] };
   major?: boolean;
   occursInSceneId?: string;
   revealedInSceneIds?: string[];
   referencedInSceneIds?: string[];
   participantIds?: string[];
+  sceneInteractions?: { sceneId: string; relationship: 'investigated' | 'new_evidence' | 'reinterpreted' }[];
   /** Explicit context overrides; absent on legacy events, whose values stay independent. */
   contextOverrides?: string[];
 }
@@ -45,8 +57,12 @@ export interface IdentityMerge {
   links: { kind: 'scene' | 'event'; id: string; field: string; targetHad: boolean }[];
   relationships?: import('./profiles').CharacterRelationship[];
   childIds?: string[];
+  worldLinks?: { worldId?: string; type: 'member' | 'from' | 'to' | 'reportsTo' | 'reportsToMany' | 'occurrence' | 'field'; field?: string; id?: string; targetHad?: boolean }[];
 }
 export interface StoryRecord {
+  worlds?: import('./worlds').WorldRecord[];
+  worldOccurrences?: import('./worlds').WorldOccurrence[];
+  worldUi?: import('./worlds').WorldUi;
   schemaVersion: 1;
   projectId: string;
   plots: Plot[];

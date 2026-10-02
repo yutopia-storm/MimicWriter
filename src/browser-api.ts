@@ -1,3 +1,4 @@
+import { parseWorldPackage } from './domain/worlds';
 import { importProjectImage, readProjectImage } from './profile-assets-browser';
 import { migrateStory } from './domain/story';
 import type { StoryRecord } from './shared/story';
@@ -158,5 +159,8 @@ export const browserPreviewApi: DesktopApi = {
     screenplays[saved.id] = saved; write(KEYS.screenplays, screenplays); return saved;
   },
   async saveOwnerConfig(config) { write(KEYS.owner, config); return config; },
+  async deleteLibraryWorld(id) { const key = 'story-world-library'; const previous = read<import('./shared/worlds').WorldPackage[]>(key, []); write(key + ':backup:' + Date.now(), previous); write(key, previous.filter(p => p.world.id !== id)); },
+  async listWorldLibrary() { return read<import('./shared/worlds').WorldPackage[]>('story-world-library', []).map(parseWorldPackage); },
+  async saveLibraryWorld(value) { const p = parseWorldPackage(value); const key = 'story-world-library'; const previous = read<import('./shared/worlds').WorldPackage[]>(key, []); write(key + ':backup:' + Date.now(), previous); write(key, [...previous.filter(x => x.world.id !== p.world.id), p]); return p; },
   async savePreferences(preferences) { write(KEYS.preferences, preferences); return preferences; }
 };
