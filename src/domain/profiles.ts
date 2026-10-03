@@ -4,6 +4,7 @@ import type { Chronology, StoryEntity, StoryRecord } from '../shared/story';
 import { parseCharacterCue } from './continuous-editor';
 import { queryTimeline, resolveEvent } from './story';
 import { STORY_TIME_PERIODS } from '../shared/story-config';
+import { compareWorldPoints } from './worlds';
 
 const key = (value: string) => value.trim().replace(/\s+/g, ' ').toUpperCase();
 export function ageFromDateOfBirth(value: string, today = new Date()): number | undefined {
@@ -101,10 +102,16 @@ export function relationshipDisplayName(relationship: CharacterRelationship) {
   const type = (relationship.type ?? relationship.label) || 'Relationship';
   return relationship.modifier === 'in-law' ? `${type} in-law` : relationship.modifier ? `${relationship.modifier} ${type}` : type;
 }
-export function appearanceForScene(story: StoryRecord, character: StoryEntity, sceneId?: string): { appearance?: Appearance; conflicts: Appearance[] } {
+export function appearanceForScene(story: StoryRecord, character: StoryEntity, sceneId?: string, documents: ScreenplayRecord[] = []): { appearance?: Appearance; conflicts: Appearance[] } {
   const appearances = character.profile?.appearances ?? [];
-  const chronology = story.scenes.find(item => item.sceneId === sceneId)?.chronology;
-  const ranked = appearances.map(item => ({ item, rank: sceneId && item.sceneIds?.includes(sceneId) ? 4 : !item.sceneIds?.length && (item.from || item.until) && pointRangeApplies(story, chronology, item.from, item.until) ? (item.from?.eventId || item.from?.sceneId || item.until?.eventId || item.until?.sceneId ? 3 : 2) : item.isDefault ? 1 : 0 })).filter(item => item.rank > 0);
+  const applies = (item: Appearance) => {
+    if (!sceneId) return false;
+    const at = {sceneId};
+    const lower = item.from ? compareWorldPoints(at,item.from,story,documents) : 0;
+    const upper = item.until ? compareWorldPoints(at,item.until,story,documents) : -1;
+    return lower !== undefined && upper !== undefined && lower >= 0 && upper < 0;
+  };
+  const ranked = appearances.map(item => ({ item, rank: sceneId && item.sceneIds?.includes(sceneId) ? 4 : !item.sceneIds?.length && (item.from || item.until) && applies(item) ? (item.from?.eventId || item.from?.sceneId || item.until?.eventId || item.until?.sceneId ? 3 : 2) : item.isDefault ? 1 : 0 })).filter(item => item.rank > 0);
   const best = Math.max(0, ...ranked.map(item => item.rank));
   const choices = ranked.filter(item => item.rank === best).map(item => item.item);
   return choices.length === 1 ? { appearance: choices[0], conflicts: [] } : { conflicts: choices };

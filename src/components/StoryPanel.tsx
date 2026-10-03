@@ -63,21 +63,19 @@ export function StoryPanel({ workspace, screenplay, open, sceneId, plotTerm, tim
     return () => window.removeEventListener('world-occurrences-remapped', remap);
   }, []);
   const change = (next: StoryRecord) => { if (!permanentNext.current) metadataHistory.current = [...metadataHistory.current.slice(-49), latest.current]; permanentNext.current = false; latest.current = next; setStory(next); onDraft?.(next); generation.current++; setVersion(generation.current); setStatus('Unsaved changes'); onState('unsaved'); };
-  useEffect(() => {
-    if (!version) return;
-    const timer = setTimeout(() => {
-      const snapshot = latest.current;
-      queue.current = queue.current.catch(() => {}).then(async () => {
-        setStatus('Saving…'); onState('saving');
-        try {
-          const saved = await window.desktop.saveStory(workspace.project.id, snapshot);
-          onSaved(saved);
-          if (generation.current === version) { setStatus('Saved'); setError(''); onState('saved'); }
-        } catch (reason) { setStatus('Save failed'); setError(String(reason)); onState('error'); }
-      });
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [version]);
+  const savedGeneration=useRef(0),saveTimer=useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const persistStory=()=>{
+    if(saveTimer.current)clearTimeout(saveTimer.current);
+    const snapshot=latest.current,currentGeneration=generation.current;
+    const pending=queue.current.catch(()=>{}).then(async()=>{
+      if(currentGeneration<=savedGeneration.current)return;
+      setStatus('Saving…');onState('saving');
+      try{const saved=await window.desktop.saveStory(workspace.project.id,snapshot);savedGeneration.current=currentGeneration;onSaved(saved);if(generation.current===currentGeneration){setStatus('Saved');setError('');onState('saved');}}
+      catch(reason){setStatus('Save failed');setError(String(reason));onState('error');throw reason;}
+    });queue.current=pending;return pending;
+  };
+  useEffect(()=>{const flush=(event:Event)=>{(event as CustomEvent<Promise<unknown>[]>).detail.push(persistStory());};window.addEventListener('project-flush',flush);return()=>window.removeEventListener('project-flush',flush);},[]);
+  useEffect(()=>{if(!version)return;saveTimer.current=setTimeout(()=>{void persistStory().catch(()=>{});},500);return()=>{if(saveTimer.current)clearTimeout(saveTimer.current);};},[version]);
   useEffect(() => {
     const timer = setTimeout(() => {
       const filled = synchronizeSceneDefaults(latest.current, documents);

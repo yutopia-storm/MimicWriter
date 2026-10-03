@@ -22,7 +22,7 @@ export type RelationshipModifier = 'biological' | 'adoptive' | 'foster' | 'step'
 export type RelationshipType = typeof RELATIONSHIP_TYPES[number];
 export const RELATIONSHIP_TYPES = ['Parent','Dad','Mum','Child','Son','Daughter','Sibling','Brother','Sister','Grandparent','Granddad','Grandma','Grandchild','Grandson','Granddaughter','Cousin','Uncle','Aunty','Nephew','Niece','Partner','Boyfriend','Girlfriend','Fiancé','Fiancée','Spouse','Wife','Husband','Guardian','Ward','Friend','Family friend','Acquaintance','Colleague','Enemy','Other'] as const;
 export const RELATIONSHIP_MODIFIERS = ['biological','adoptive','foster','step','half','in-law'] as const;
-export interface InspectorContext { type: 'character' | 'location' | 'event' | 'plot' | 'scene'; entityId: string; sourceSceneId?: string; sourceIdentity?: string; }
+export interface InspectorContext { type: 'character' | 'location' | 'event' | 'plot' | 'scene'; entityId: string; sourceSceneId?: string; sourceIdentity?: string; section?: string; }
 export interface ProfilePreferences {
   characterWorldFields?: string[];
   characterModules?: string[]; locationModules?: string[];

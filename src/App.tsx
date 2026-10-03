@@ -1,3 +1,4 @@
+import { flushProjectEdits } from './domain/persistence-client';
 import { WorldWorkspace } from './components/WorldWorkspace';
 import { migrateStory } from './domain/story';
 import { useEffect, useState } from 'react';
@@ -19,7 +20,7 @@ function App() {
   if (!data.appState.setupCompleted || !data.storageHealth.writable) return <Onboarding data={data} onReady={setData} error={error} setError={setError}/>;
 
   const term = (key: string) => data.ownerConfig.terminology[key] ?? key;
-  const navigate = (next: View) => { setView(next); setActiveWorkspace(null); };
+  const navigate = async (next: View) => { try{await flushProjectEdits();if(activeWorkspace)await window.desktop.projectHistory(activeWorkspace.project.id,{action:'release'});setView(next);setActiveWorkspace(null);}catch(reason){setError(String(reason));} };
   return <div className="app-shell">
     <aside className="sidebar">
       <button className="wordmark" onClick={() => navigate('library')}><span className="brand-mark">{data.ownerConfig.brand.shortName.slice(0, 2)}</span><span><b>{data.ownerConfig.brand.productName}</b><small>STORY WORKSPACE</small></span></button>

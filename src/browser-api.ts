@@ -1,3 +1,6 @@
+import { ProjectHistory, stateRevision } from './domain/project-history';
+import { withPersistenceClient } from './domain/persistence-client';
+import type { HistoryPort, WriterIdentity } from './shared/project-history';
 import { parseWorldPackage } from './domain/worlds';
 import { importProjectImage, readProjectImage } from './profile-assets-browser';
 import { migrateStory } from './domain/story';
@@ -63,7 +66,8 @@ function readStory(projectId: string): StoryRecord {
 }
 let browserClipboard = '';
 
-export const browserPreviewApi: DesktopApi = {
+const browserBase: DesktopApi = {
+  async projectHistory(projectId,request){const result=await browserHistory(projectId).request(request);return result.workspace?{...result,workspace:await browserBase.openWorkspace(projectId)}:result;},
   preferClipboardEvents: true,
   async bootstrap() { return bootstrap(); },
   async readClipboard() {
@@ -145,18 +149,17 @@ export const browserPreviewApi: DesktopApi = {
   async setCollectionProject(collectionId, projectId, included) { return updateCollections((values) => values.map((item) => item.id !== collectionId ? item : { ...item, projectIds: included ? [...item.projectIds.filter((id) => id !== projectId), projectId] : item.projectIds.filter((id) => id !== projectId), updatedAt: new Date().toISOString() })); },
   async reorderCollectionProject(collectionId, projectId, targetIndex) { return updateCollections((values) => values.map((item) => { if (item.id !== collectionId) return item; const ids = item.projectIds.filter((id) => id !== projectId); ids.splice(Math.max(0, Math.min(targetIndex, ids.length)), 0, projectId); return { ...item, projectIds: ids }; })); },
   importProjectImage, readProjectImage,
-  async saveStory(projectId, value) {
+  async saveStory(projectId, value, context) {
     await browserPreviewApi.openProject(projectId);
     const story = migrateStory(value, projectId);
     const key = 'screenplay-desktop.preview.story:' + projectId;
-    write(key + ':backup', readStory(projectId));
-    write(key, story);
-    return story;
+    const previous=readStory(projectId);await browserExpected(projectId,previous,story,context?.expectedRevision);
+    write(key, story);try{write(key+':backup',previous);await browserHistory(projectId).story(previous,story);}catch{browserHistory(projectId).warning='Your current work is saved, but History could not be recorded.';}return {...story,storageRevision:await stateRevision(story)};
   },
-  async saveScreenplay(projectId, screenplay) {
+  async saveScreenplay(projectId, screenplay, context) {
     if (screenplay.projectId !== projectId) throw new Error('Screenplay does not belong to this project.');
     const screenplays = read<Record<string, ScreenplayRecord>>(KEYS.screenplays, {}); const saved = { ...normalizeSceneHeadings(screenplay), updatedAt: new Date().toISOString() };
-    screenplays[saved.id] = saved; write(KEYS.screenplays, screenplays); return saved;
+    const previous=screenplays[saved.id];await browserExpected(projectId,previous,saved,context?.expectedRevision);screenplays[saved.id] = saved; write(KEYS.screenplays, screenplays);try{await browserHistory(projectId).screenplay(previous,saved,context?.sceneId);}catch{browserHistory(projectId).warning='Your current work is saved, but History could not be recorded.';}return {...saved,storageRevision:await stateRevision(saved)};
   },
   async saveOwnerConfig(config) { write(KEYS.owner, config); return config; },
   async deleteLibraryWorld(id) { const key = 'story-world-library'; const previous = read<import('./shared/worlds').WorldPackage[]>(key, []); write(key + ':backup:' + Date.now(), previous); write(key, previous.filter(p => p.world.id !== id)); },
@@ -164,3 +167,9 @@ export const browserPreviewApi: DesktopApi = {
   async saveLibraryWorld(value) { const p = parseWorldPackage(value); const key = 'story-world-library'; const previous = read<import('./shared/worlds').WorldPackage[]>(key, []); write(key + ':backup:' + Date.now(), previous); write(key, [...previous.filter(x => x.world.id !== p.world.id), p]); return p; },
   async savePreferences(preferences) { write(KEYS.preferences, preferences); return preferences; }
 };
+
+const browserHistories=new Map<string,ProjectHistory>();
+function browserHistory(id:string){let history=browserHistories.get(id);if(!history){const actor=read<WriterIdentity>('project-writer-identity',{id:crypto.randomUUID(),deviceId:crypto.randomUUID(),displayName:'You',color:'#e1a35f'});write('project-writer-identity',actor);const port:HistoryPort={read:async(key,fallback)=>read('project-history:'+id+':'+key,fallback),write:async(key,value)=>write('project-history:'+id+':'+key,value),workspace:()=>browserBase.openWorkspace(id),apply:async(scope,value)=>{const w=await browserBase.openWorkspace(id);const next=scope==='project'?value as ProjectWorkspace:scope==='story'?{...w,story:value as StoryRecord}:{...w,screenplays:w.screenplays.map(d=>d.id===(value as ScreenplayRecord).id?value as ScreenplayRecord:d)};write(KEYS.projects,read<ProjectRecord[]>(KEYS.projects,[]).map(p=>p.id===id?next.project:p));const docs=read<Record<string,ScreenplayRecord>>(KEYS.screenplays,{});for(const d of next.screenplays)docs[d.id]=d;write(KEYS.screenplays,docs);write('screenplay-desktop.preview.story:'+id,migrateStory(next.story,id));}};history=new ProjectHistory(port,actor,id);browserHistories.set(id,history);}return history;}
+async function browserExpected(id:string,before:unknown,incoming:unknown,expected?:string){if(expected&&await stateRevision(before)!==expected){write('project-conflict:'+id+':'+crypto.randomUUID(),{before,incoming,expected});throw Error('Another copy changed this project. Your edits were preserved. Compare the copies before continuing.');}}
+for(const key of ['createEpisode','renameEpisode','createSeason','renameSeason','reorderSeason','moveEpisode'] as const){const original=browserBase[key].bind(browserBase);(browserBase as any)[key]=async(...args:any[])=>{const before=await browserBase.openWorkspace(args[0]);const next=await (original as any)(...args);try{await browserHistory(args[0]).project(before,next);}catch{browserHistory(args[0]).warning='Your current work is saved, but History could not be recorded.';}return {...next,screenplays:await Promise.all(next.screenplays.map(async (d:ScreenplayRecord)=>({...d,storageRevision:await stateRevision(d)}))),story:next.story?{...next.story,storageRevision:await stateRevision(next.story)}:undefined};};}
+export const browserPreviewApi=withPersistenceClient({...browserBase,openWorkspace:async id=>{const w=await browserBase.openWorkspace(id);return {...w,screenplays:await Promise.all(w.screenplays.map(async d=>({...d,storageRevision:await stateRevision(d)}))),story:w.story?{...w.story,storageRevision:await stateRevision(w.story)}:undefined};}});

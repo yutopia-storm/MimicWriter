@@ -83,6 +83,12 @@ export function mergeIdentity(story: StoryRecord, kind: IdentityMerge['kind'], s
     }
   }
   for (const occurrence of next.worldOccurrences ?? []) if (occurrence.entity.kind === worldKind && occurrence.entity.id === sourceId) { record.worldLinks.push({ worldId: occurrence.worldId, type: 'occurrence', id: occurrence.id }); occurrence.entity.id = targetId; }
+  for(const occurrence of next.worldOccurrences??[]){
+    const source=occurrence.source;if(!source)continue;
+    const field=kind==='characters'?'speakerId':'locationId';
+    if(source[field]===sourceId){record.worldLinks.push({worldId:occurrence.worldId,type:'source',id:occurrence.id,field});source[field]=targetId;}
+    if(kind==='characters'&&source.characterIds?.includes(sourceId)){record.worldLinks.push({worldId:occurrence.worldId,type:'source',id:occurrence.id,field:'characterIds',targetHad:source.characterIds.includes(targetId)});source.characterIds=unique(source.characterIds.map(id=>id===sourceId?targetId:id));}
+  }
   target.sourceNames = unique([...aliases(target), ...aliases(source)]);
   target.sourceElementIds = unique([...target.sourceElementIds ?? [], ...source.sourceElementIds ?? []]);
   for (const item of next[kind]) if (item.parentId === sourceId) item.parentId = item.id === targetId ? source.parentId : targetId;
@@ -115,6 +121,7 @@ export function separateIdentity(story: StoryRecord, kind: IdentityMerge['kind']
   if (source.parentId && !next[kind].some(item => item.id === source.parentId)) source.parentId = undefined;
   next[kind].push(source);
   for (const link of history?.worldLinks ?? []) {
+    if(link.type==='source'){const s=next.worldOccurrences?.find(o=>o.id===link.id)?.source;if(s){if(link.field==='characterIds')s.characterIds=unique([...s.characterIds?.filter(id=>link.targetHad||id!==targetId)??[],source.id]);else if(link.field==='speakerId'&&s.speakerId===targetId)s.speakerId=source.id;else if(link.field==='locationId'&&s.locationId===targetId)s.locationId=source.id;}continue;}
     if (link.type === 'occurrence') { const o = next.worldOccurrences?.find(o => o.id === link.id); if (o?.entity.id === targetId) o.entity.id = source.id; continue; }
     const world = next.worlds?.find(w => w.id === link.worldId); if (!world) continue;
     if (link.type === 'field') { const ref = link.field ? world.entities.find(e => e.id === link.id)?.fieldLinks?.[link.field] : undefined; if (ref?.id === targetId) ref.id = source.id; continue; }

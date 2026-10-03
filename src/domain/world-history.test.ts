@@ -7,6 +7,10 @@ import { deleteWorldData } from './world-delete';
 import { saveMembership } from './world-memberships';
 import type { WorldEntity } from '../shared/worlds';
 
+it('a condition change preserves independent appearance periods and earlier combined states',()=>{
+ const story=migrateStory(null,'p');const car:WorldEntity={id:'car',kind:'vehicle',name:'Car',description:'',history:[{id:'first',fromPoint:{chronology:{day:1}},fields:{Appearance:'Silver sticker',Condition:'Pristine'}}]};car.history=saveWorldState(car,{id:'damage',fromPoint:{chronology:{day:4}},fields:{Condition:'Damaged'}},story,[]);expect(worldStateAt(car,story,[],{chronology:{day:4}})).toMatchObject({Appearance:'Silver sticker',Condition:'Damaged'});expect(worldStateAt(car,story,[],{chronology:{day:2}})).toMatchObject({Appearance:'Silver sticker',Condition:'Pristine'});
+});
+
 it('preserves original condition and closes ongoing history at each new story boundary',()=>{
  const story=migrateStory(null,'p');let car:WorldEntity={id:'car',kind:'vehicle',name:'Mondeo',description:'Original bodywork',fields:{Condition:'Pristine',Colour:'Silver'}};
  car={...car,history:saveWorldState(car,{id:'crack',fromPoint:{chronology:{day:4}},fields:{Condition:'Cracked screen'}},story,[])};

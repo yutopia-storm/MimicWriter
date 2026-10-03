@@ -113,6 +113,7 @@ export interface ScreenplayNote {
 }
 
 export interface ScreenplayRecord {
+  storageRevision?: string;
   schemaVersion: 1;
   id: string;
   projectId: string;
@@ -142,6 +143,8 @@ export interface BootstrapData {
 }
 
 export interface DesktopApi {
+  onCloseRequest?(callback?:()=>Promise<void>):void;
+  projectHistory(projectId:string, request:import('./project-history').HistoryRequest):Promise<import('./project-history').HistoryResult>;
   deleteLibraryWorld(id: string): Promise<void>;
   listWorldLibrary(): Promise<import('./worlds').WorldPackage[]>;
   saveLibraryWorld(value: import('./worlds').WorldPackage): Promise<import('./worlds').WorldPackage>;
@@ -170,8 +173,8 @@ export interface DesktopApi {
   deleteCollection(id: string): Promise<ProjectCollection[]>;
   setCollectionProject(collectionId: string, projectId: string, included: boolean): Promise<ProjectCollection[]>;
   reorderCollectionProject(collectionId: string, projectId: string, targetIndex: number): Promise<ProjectCollection[]>;
-  saveScreenplay(projectId: string, screenplay: ScreenplayRecord): Promise<ScreenplayRecord>;
-  saveStory(projectId: string, story: import('./story').StoryRecord): Promise<import('./story').StoryRecord>;
+  saveScreenplay(projectId: string, screenplay: ScreenplayRecord, context?:import('./project-history').SaveContext): Promise<ScreenplayRecord>;
+  saveStory(projectId: string, story: import('./story').StoryRecord, context?:import('./project-history').SaveContext): Promise<import('./story').StoryRecord>;
   saveOwnerConfig(config: OwnerConfig): Promise<OwnerConfig>;
   savePreferences(preferences: UserPreferences): Promise<UserPreferences>;
 }

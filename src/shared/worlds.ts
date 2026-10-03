@@ -76,6 +76,16 @@ export interface WorldRecord {
     archived?: boolean;
 }
 export interface WorldOccurrence {
+    /** Capture provenance, distinct from fictional World relationships. */
+    source?: {
+        elementId?: string;
+        elementType?: string;
+        speakerId?: string;
+        characterIds?: string[];
+        locationId?: string;
+        chronology?: import('./story').Chronology;
+        recordId?: string;
+    };
     id: string;
     worldId?: string;
     entity: WorldRef;
@@ -110,6 +120,7 @@ export interface WorldUi {
     showLinks?: boolean;
 }
 export interface WorldLinkContext {
+    elementId?: string;
     screenplayId: string;
     sceneId: string;
     type: string;

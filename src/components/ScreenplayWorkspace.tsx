@@ -1,3 +1,4 @@
+import { flushProjectEdits } from '../domain/persistence-client';
 import { StoryPanel } from './StoryPanel';
 import type { StoryRecord } from '../shared/story';
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -138,6 +139,7 @@ export function ScreenplayWorkspaceView({
   const recentScreenplayKey = `screenplay-editor-active:${initialWorkspace.project.id}`;
   const recentScreenplayId = localStorage.getItem(recentScreenplayKey);
   const [workspace, setWorkspace] = useState(initialWorkspace);
+  const [recoveryGeneration,setRecoveryGeneration]=useState(0);
   const workspaceRef = useRef(workspace); workspaceRef.current = workspace;
   const [storyState, setStoryState] = useState<SaveState>("saved");
   const [activeId, setActiveId] = useState(
@@ -173,7 +175,7 @@ export function ScreenplayWorkspaceView({
   const [editingState, setEditingState] = useState<SaveState>("saved");
   useEffect(() => {
     const protect = (event: BeforeUnloadEvent) => {
-      if (editingState !== "saved" || storyState !== "saved") {
+      if (document.body.dataset.closeReady!=="true" && (editingState !== "saved" || storyState !== "saved")) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -190,6 +192,7 @@ export function ScreenplayWorkspaceView({
     onWorkspace(next);
   };
   const createEpisode = async () => {
+    await flushProjectEdits();
     if (!episodeTitle.trim() || !activeSeason) return;
     const next = await window.desktop.createEpisode(
       workspace.project.id,
@@ -218,13 +221,10 @@ export function ScreenplayWorkspaceView({
     });
     return saved;
   };
-  const canLeave = () =>
-    (editingState === "saved" && storyState === "saved") ||
-    window.confirm(
-      "The latest changes have not been saved. Leave and discard them?",
-    );
-  const selectScreenplay = (id: string) => {
-    if (id === activeId || canLeave()) {
+  const canLeave = async () => {try{await flushProjectEdits();await window.desktop.projectHistory?.(workspace.project.id,{action:'release'});return true;}catch{return false;}};
+  useEffect(()=>{const restored=(event:Event)=>{const next=(event as CustomEvent<ProjectWorkspace>).detail;if(next.project.id!==workspace.project.id)return;updateWorkspace(next);setRecoveryGeneration(v=>v+1);};window.addEventListener('history-workspace-restored',restored);return()=>window.removeEventListener('history-workspace-restored',restored);},[workspace.project.id]);
+  const selectScreenplay = async (id: string) => {
+    if (id === activeId || await canLeave()) {
       setEditingState("saved");
       setStoryState("saved");
       setActiveId(id);
@@ -365,8 +365,8 @@ export function ScreenplayWorkspaceView({
       <header className="workspace-topbar">
         <button
           className="back-button"
-          onClick={() => {
-            if (canLeave()) onBack();
+          onClick={async () => {
+            if (await canLeave()) onBack();
           }}
         >
           <ArrowLeft />
@@ -405,7 +405,7 @@ export function ScreenplayWorkspaceView({
         </section>
       ) : (
         <ScreenplayEditor
-          key={active.id}
+          key={active.id+":"+recoveryGeneration}
           initial={active}
           workspace={workspace}
           plotTerm={term('plot') === 'plot' ? 'Plot' : term('plot')}
@@ -513,6 +513,15 @@ function ScreenplayEditor({
   current.current = screenplay;
   const sceneRefs = useRef(new Map<string, HTMLElement>());
   const scrollRef = useRef<HTMLElement>(null);
+  const pendingSave=useRef<ScreenplayRecord|undefined>(undefined);
+  const saveQueue=useRef(Promise.resolve());
+  const latestSave=useRef(onSave);latestSave.current=onSave;
+  const historyFocus=useRef(activeSceneId);
+  const [historyCaretSceneId,setHistoryCaretSceneId]=useState(activeSceneId);
+  const persistPending=async()=>{if(timer.current)clearTimeout(timer.current);const next=pendingSave.current;if(!next){await saveQueue.current;return;}pendingSave.current=undefined;const version=editVersion.current;const task=saveQueue.current.catch(()=>{}).then(async()=>{reportState('saving');try{const saved=await latestSave.current(next);if(editVersion.current===version){setScreenplay(saved);current.current=saved;reportState('saved');} }catch(error){pendingSave.current=current.current;reportState('error');setSaveError(String(error));throw error;}});saveQueue.current=task;await task;};
+  useEffect(()=>{const flush=(event:Event)=>{(event as CustomEvent<Promise<unknown>[]>).detail.push(persistPending().then(()=>window.desktop.projectHistory?.(workspace.project.id,{action:'finish',screenplayId:initial.id})));};window.addEventListener('project-flush',flush);window.desktop.onCloseRequest?.(()=>flushProjectEdits().then(()=>window.desktop.projectHistory?.(workspace.project.id,{action:'release'})).then(()=>{document.body.dataset.closeReady='true';}));return()=>{window.removeEventListener('project-flush',flush);window.desktop.onCloseRequest?.(undefined);};},[]);
+  useEffect(()=>{const renew=()=>void window.desktop.projectHistory?.(workspace.project.id,{action:'heartbeat'}).catch(()=>{});renew();const heartbeat=setInterval(renew,30000);return()=>clearInterval(heartbeat);},[workspace.project.id]);
+  useEffect(()=>{if(activeSceneId!==historyFocus.current){const previousSceneId=historyFocus.current;historyFocus.current=activeSceneId;setHistoryCaretSceneId(activeSceneId);void persistPending().then(()=>window.desktop.projectHistory?.(workspace.project.id,{action:'finish',screenplayId:initial.id,sceneId:previousSceneId})).catch(()=>{});}},[activeSceneId]);
   const optionsRef = useRef<HTMLDetailsElement>(null);
   const undoStack = useRef<ScreenplayRecord[]>([]);
   const redoStack = useRef<ScreenplayRecord[]>([]);
@@ -559,18 +568,18 @@ function ScreenplayEditor({
   }, []);
   useEffect(() => {
     const seasons = workspace.project.series?.seasons.map((season, index) => ({ id: season.id, label: `Series ${index + 1}`, screenplayIds: season.episodes.map(episode => episode.screenplayId) })) ?? [];
-    window.dispatchEvent(new CustomEvent('profile-scope-context', { detail: { projectType: workspace.project.projectType, activeSceneId, activeScreenplayId: screenplay.id, seasons } }));
-  }, [workspace.project.projectType, workspace.project.series, activeSceneId, screenplay.id]);
+    window.dispatchEvent(new CustomEvent('profile-scope-context', { detail: { projectType: workspace.project.projectType, activeSceneId, historySceneId:editorView==='scene'?activeSceneId:historyCaretSceneId, activeScreenplayId: screenplay.id, seasons } }));
+  }, [workspace.project.projectType, workspace.project.series, activeSceneId, historyCaretSceneId, editorView, screenplay.id]);
   useEffect(() => {
     const track = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
-      if (id) setActiveSceneId(id);
+      if (id) {setHistoryCaretSceneId(id);if(id!==historyFocus.current){const previousSceneId=historyFocus.current;historyFocus.current=id;void persistPending().then(()=>window.desktop.projectHistory?.(workspace.project.id,{action:'finish',screenplayId:initial.id,sceneId:previousSceneId})).catch(()=>{});}setActiveSceneId(id);}
     };
     window.addEventListener("screenplay-scene-focus", track);
     return () => window.removeEventListener("screenplay-scene-focus", track);
   }, []);
   useEffect(() => {
-    document.body.dataset.editorView = editorView;
+    document.body.dataset.editorView = editorView;window.dispatchEvent(new Event('editor-view-changed'));
     const viewGroup = document.querySelector(".view-switch");
     let continuous = viewGroup?.querySelector<HTMLButtonElement>(
       "[data-continuous-view]",
@@ -693,22 +702,8 @@ function ScreenplayEditor({
     reportState("unsaved");
     setSaveError("");
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      reportState("saving");
-      try {
-        const saved = await onSave(next);
-        if (editVersion.current === version) {
-          setScreenplay(saved);
-          current.current = saved;
-          reportState("saved");
-        }
-      } catch (error) {
-        if (editVersion.current === version) {
-          reportState("error");
-          setSaveError((error as Error).message);
-        }
-      }
-    }, 800);
+    pendingSave.current=next;
+    timer.current=setTimeout(()=>{void persistPending().catch(()=>{});},800);
   };
   useEffect(() => {
     if (!normalizedInitialNeedsSave.current) return;
@@ -1105,7 +1100,7 @@ function ScreenplayEditor({
       <main
         className="screenplay-scroll"
         ref={scrollRef}
-        onScroll={(event) => { persistSession(); const node = event.currentTarget; const top = node.getBoundingClientRect().top; const elements = Array.from(node.querySelectorAll<HTMLElement>('[data-page-number],.pagination-boundary')); const visible = elements.filter(element => element.getBoundingClientRect().top <= top + 80).at(-1) ?? elements[0]; if (visible) setCurrentPage(Number(visible.dataset.pageNumber)); }}
+        onScroll={(event) => { persistSession(); const node = event.currentTarget; const top = node.getBoundingClientRect().top;const blocks=Array.from(node.querySelectorAll<HTMLElement>('.continuous-block[data-scene-id],.screenplay-scene[data-scene-id]'));const viewed=blocks.find(e=>e.getBoundingClientRect().bottom>top+80)?.dataset.sceneId;if(viewed)window.dispatchEvent(new CustomEvent('screenplay-history-scroll',{detail:viewed})); const elements = Array.from(node.querySelectorAll<HTMLElement>('[data-page-number],.pagination-boundary')); const visible = elements.filter(element => element.getBoundingClientRect().top <= top + 80).at(-1) ?? elements[0]; if (visible) setCurrentPage(Number(visible.dataset.pageNumber)); }}
       >
         {findOpen && (
           <div className="find-panel">

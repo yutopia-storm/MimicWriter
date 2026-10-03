@@ -452,9 +452,14 @@ export function ContinuousScreenplayEditor({ screenplay, worldStory, notesVisibl
     const worldContext = (event: MouseEvent) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-element-id]'); if (!target) return;
       event.preventDefault();
+      if (view.state.selection.empty) {
+        const clicked = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        if (clicked) view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, clicked.pos)));
+      }
       const selection = noteSelectionForState(view.state, view);
-      const element = latest.current.scenes.flatMap(s => s.elements).find(e => e.id === target.dataset.elementId);
-      const detail = { screenplayId: latest.current.id, sceneId: selection?.sceneId ?? target.dataset.sceneId, type: element?.type ?? 'action', ...(selection ? { from: selection.from, to: selection.to, selectedText: selection.selectedText } : {}), x: event.clientX, y: event.clientY };
+      const element = latest.current.scenes.flatMap(s => s.elements).find(e => e.id === (selection?.from.elementId ?? target.dataset.elementId));
+      const cursor = {elementId: element?.id ?? target.dataset.elementId!, offset:view.state.selection.$from.parentOffset};
+      const detail = { screenplayId: latest.current.id, sceneId: selection?.sceneId ?? target.dataset.sceneId, elementId: element?.id, type: element?.type ?? 'action', ...(selection ? { from: selection.from, to: selection.to, selectedText: selection.selectedText } : {from:cursor,to:cursor}), x: event.clientX, y: event.clientY };
       window.dispatchEvent(new CustomEvent('world-link-context', { detail }));
     };
     const worldInsert = (event: Event) => {

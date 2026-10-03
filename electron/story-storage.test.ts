@@ -19,17 +19,18 @@ it('migrates pre-story projects additively, persists across restart and snapshot
     story.plots.push({ id: 'a', name: 'A', description: '', color: 'accent' });
     story.scenes.push({ sceneId: workspace.screenplays[0].scenes[0].id, screenplayId: workspace.screenplays[0].id, plotIds: ['a'], presentIds: ['apple'], chronology: { day: 3 } });
     story.events.push({ id: 'event', name: 'Disappears', description: '', occursInSceneId: workspace.screenplays[0].scenes[0].id });
-    await repository.saveStory(project.id, story);
+    const savedStory = await repository.saveStory(project.id, story);
     await repository.saveScreenplay(project.id, workspace.screenplays[0]);
     const reopened = await new FileProjectRepository(root).openWorkspace(project.id);
-    expect(reopened.story).toEqual(story);
+    expect(reopened.story).toEqual(savedStory);
     expect(reopened.screenplays[0]).toMatchObject({ scenes: workspace.screenplays[0].scenes });
     await repository.snapshot(project, 'story-test');
     const files = await readdir(join(root, 'Backups', project.id));
     const snapshot = JSON.parse(await readFile(join(root, 'Backups', project.id, files.find(name => name.endsWith('story-test.json'))!), 'utf8'));
-    expect(snapshot.story).toEqual(story);
+    const { storageRevision: _revision, ...persistedStory } = savedStory;
+    expect(snapshot.story).toEqual(persistedStory);
     expect(files.some(name => name.endsWith('-story.json'))).toBe(true);
     await expect(repository.saveStory(project.id, { ...story, projectId: 'wrong' })).rejects.toThrow();
-    expect((await repository.openWorkspace(project.id)).story).toEqual(story);
+    expect((await repository.openWorkspace(project.id)).story).toEqual(savedStory);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

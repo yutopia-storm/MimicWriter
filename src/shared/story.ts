@@ -57,9 +57,10 @@ export interface IdentityMerge {
   links: { kind: 'scene' | 'event'; id: string; field: string; targetHad: boolean }[];
   relationships?: import('./profiles').CharacterRelationship[];
   childIds?: string[];
-  worldLinks?: { worldId?: string; type: 'member' | 'from' | 'to' | 'reportsTo' | 'reportsToMany' | 'occurrence' | 'field'; field?: string; id?: string; targetHad?: boolean }[];
+  worldLinks?: { worldId?: string; type: 'member' | 'from' | 'to' | 'reportsTo' | 'reportsToMany' | 'occurrence' | 'field' | 'source'; field?: string; id?: string; targetHad?: boolean }[];
 }
 export interface StoryRecord {
+  storageRevision?: string;
   worlds?: import('./worlds').WorldRecord[];
   worldOccurrences?: import('./worlds').WorldOccurrence[];
   worldUi?: import('./worlds').WorldUi;

@@ -1,3 +1,6 @@
+import { fileHistory, projectWrite, ensureExpected, historySafe, periodicProjectBackup, releaseProject, FALLBACK_WRITER } from './project-persistence';
+import { stateRevision } from '../src/domain/project-history';
+import type { HistoryEntry, HistoryRequest, HistoryResult, SaveContext, WriterIdentity } from '../src/shared/project-history';
 import { parseWorldPackage } from '../src/domain/worlds';
 import type { WorldPackage } from '../src/shared/worlds';
 import { validateProfileImage } from '../src/shared/profile-assets';
@@ -13,6 +16,7 @@ import { readJson, writeJsonAtomic } from './json-store';
 import { migrateStory } from '../src/domain/story';
 import type { StoryRecord } from '../src/shared/story';
 
+const projectLocations=new Map<string,string>();
 const worldLibraryWrites = new Map<string, Promise<unknown>>();
 
 export const MANAGED_FOLDERS = ['Projects', 'Collections', 'Backups', 'Exports', 'References'] as const;
@@ -39,8 +43,22 @@ export async function initializeStorageRoot(root: string): Promise<StorageHealth
 }
 
 export class FileProjectRepository {
-  constructor(private readonly root: string) {}
-  private projectDir(id: string) { return join(this.root, 'Projects', id); }
+  constructor(private readonly root: string,private readonly actor:WriterIdentity=FALLBACK_WRITER) {
+    const importImage=this.importProjectImage.bind(this);this.importProjectImage=(id,value)=>projectWrite(this.projectDir(id),this.actor,()=>importImage(id,value));
+    for(const key of ['createEpisode','renameEpisode','createSeason','renameSeason','reorderSeason','moveEpisode'] as const){const original=this[key].bind(this);(this as any)[key]=(...args:any[])=>projectWrite(this.projectDir(args[0]),this.actor,async()=>{const before=await this.rawWorkspace(args[0]);const next=await (original as any)(...args);await historySafe(this.history(args[0]),()=>this.history(args[0]).project(before,next));return next;});}
+  }
+  private history(id:string){return fileHistory(this.projectDir(id),this.actor,id,()=>this.rawWorkspace(id),(scope,value)=>this.applyHistory(id,scope,value));}
+  async projectHistory(id:string,request:HistoryRequest):Promise<HistoryResult>{await this.get(id);const history=this.history(id);if(['query','entry','compareVersion'].includes(request.action))return history.request(request);return projectWrite(this.projectDir(id),this.actor,async()=>{let result:HistoryResult={};if(['finish','release'].includes(request.action))await historySafe(history,async()=>{result=await history.request(request);});else result=await history.request(request);if(request.action==='release')await releaseProject(this.projectDir(id));return result.workspace?{...result,workspace:await this.openWorkspace(id)}:result;});}
+  private async applyHistory(id:string,scope:HistoryEntry['scope'],value:any){
+    const current=await this.rawWorkspace(id);const next=scope==='project'?value:scope==='story'?{...current,story:migrateStory(value,id)}:{...current,screenplays:current.screenplays.map(d=>d.id===value.id?value:d)};
+    if(next.project.id!==id||next.screenplays.some((d:ScreenplayRecord)=>d.projectId!==id||validateScreenplay(d).length))throw Error('This recovery does not belong to the project or contains invalid screenplay data.');
+    const story=migrateStory(next.story,id);await writeJsonAtomic(join(this.projectDir(id),'current','restore-pending.json'),{...next,story});
+    await this.completeRestore(id,{...next,story});
+  }
+  private async completeRestore(id:string,next:ProjectWorkspace){for(const d of next.screenplays)await writeJsonAtomic(this.screenplayFile(id,d.id),d);await writeJsonAtomic(join(this.projectDir(id),'story.json'),next.story);await writeJsonAtomic(this.projectFile(id),next.project);await rm(join(this.projectDir(id),'current','restore-pending.json'),{force:true});}
+  private async rawWorkspace(projectId:string):Promise<ProjectWorkspace>{return this.readWorkspace(projectId);}
+
+  private projectDir(id: string) { if(!/^[A-Za-z0-9_-]+$/.test(id))throw Error('Invalid project identifier.');return join(this.root, 'Projects', projectLocations.get(this.root+':'+id)??id); }
   private projectFile(id: string) { return join(this.projectDir(id), 'project.json'); }
   private screenplaysDir(projectId: string) { return join(this.projectDir(projectId), 'Screenplays'); }
   private screenplayFile(projectId: string, screenplayId: string) { return join(this.screenplaysDir(projectId), `${screenplayId}.json`); }
@@ -50,6 +68,7 @@ export class FileProjectRepository {
   private async readAndMigrate(id: string): Promise<ProjectRecord> {
     const stored = await readJson<StoredProjectRecord | null>(this.projectFile(id), null);
     if (!stored) throw new Error('Project could not be found.');
+    projectLocations.set(this.root+':'+stored.id,projectLocations.get(this.root+':'+id)??id);
     const migration = migrateProject(stored);
     if (!migration.migrated) return migration.project;
     const backupPath = join(this.root, 'Backups', id, `${new Date().toISOString().replace(/[:.]/g, '-')}-schema-v${migration.fromVersion}.json`);
@@ -76,14 +95,14 @@ export class FileProjectRepository {
     await mkdir(projectsRoot, { recursive: true });
     const entries = await readdir(projectsRoot, { withFileTypes: true });
     const projects = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
-      try { return await this.readAndMigrate(entry.name); }
+      try { const stored=await readJson<StoredProjectRecord|null>(join(projectsRoot,entry.name,'project.json'),null);if(!stored)return null;projectLocations.set(this.root+':'+stored.id,entry.name);return await this.readAndMigrate(stored.id); }
       catch { return null; }
     }));
     return projects.filter((project): project is ProjectRecord => project !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async get(id: string): Promise<ProjectRecord> {
-    return this.readAndMigrate(id);
+    const file=await readJson<StoredProjectRecord|null>(this.projectFile(id),null);if(!file){for(const entry of await readdir(join(this.root,'Projects'),{withFileTypes:true})){if(!entry.isDirectory())continue;const stored=await readJson<StoredProjectRecord|null>(join(this.root,'Projects',entry.name,'project.json'),null).catch(()=>null);if(stored?.id===id){projectLocations.set(this.root+':'+id,entry.name);break;}}}return this.readAndMigrate(id);
   }
 
   async create(title: string, projectType: ProjectType): Promise<ProjectRecord> {
@@ -104,11 +123,14 @@ export class FileProjectRepository {
     }
     await writeJsonAtomic(this.projectFile(id), project);
     await this.snapshot(project, 'created');
+    await this.history(id).request({action:'finish'});
     return project;
   }
 
-  async openWorkspace(projectId: string): Promise<ProjectWorkspace> {
-    const project = await this.get(projectId);
+  async openWorkspace(projectId:string):Promise<ProjectWorkspace>{const w=await this.readWorkspace(projectId);return {...w,screenplays:await Promise.all(w.screenplays.map(async d=>({...d,storageRevision:await stateRevision(d)}))),story:w.story?{...w.story,storageRevision:await stateRevision(w.story)}:undefined};}
+  private async readWorkspace(projectId: string): Promise<ProjectWorkspace> {
+    let project = await this.get(projectId);
+    const pending=await readJson<ProjectWorkspace|null>(join(this.projectDir(projectId),'current','restore-pending.json'),null);if(pending){await this.completeRestore(projectId,pending);project=await this.get(projectId);}
     const ids = project.projectType !== 'series' ? [project.screenplayId!] : allEpisodes(project).map((episode) => episode.screenplayId);
     const screenplays = await Promise.all(ids.map(async (id) => {
       const screenplay = await readJson<ScreenplayRecord | null>(this.screenplayFile(projectId, id), null);
@@ -185,15 +207,19 @@ export class FileProjectRepository {
   async setCollectionProject(collectionId: string, projectId: string, included: boolean) { await this.get(projectId); const now = new Date().toISOString(); const collections = await this.listCollections(); return this.saveCollections(collections.map((item) => item.id !== collectionId ? item : { ...item, updatedAt: now, projectIds: included ? [...item.projectIds.filter((id) => id !== projectId), projectId] : item.projectIds.filter((id) => id !== projectId) })); }
   async reorderCollectionProject(collectionId: string, projectId: string, targetIndex: number) { const collections = await this.listCollections(); return this.saveCollections(collections.map((item) => { if (item.id !== collectionId) return item; const ids = item.projectIds.filter((id) => id !== projectId); ids.splice(Math.max(0, Math.min(targetIndex, ids.length)), 0, projectId); return { ...item, projectIds: ids, updatedAt: new Date().toISOString() }; })); }
 
-  async saveScreenplay(projectId: string, screenplay: ScreenplayRecord): Promise<ScreenplayRecord> {
+  async saveScreenplay(projectId:string,screenplay:ScreenplayRecord,context?:SaveContext):Promise<ScreenplayRecord>{return projectWrite(this.projectDir(projectId),this.actor,()=>this.writeScreenplay(projectId,screenplay,context));}
+  private async writeScreenplay(projectId: string, screenplay: ScreenplayRecord,context?:SaveContext): Promise<ScreenplayRecord> {
     const project = await this.get(projectId);
     const allowed = project.projectType !== 'series' ? project.screenplayId === screenplay.id : allEpisodes(project).some((episode) => episode.screenplayId === screenplay.id);
     if (!allowed || screenplay.projectId !== projectId) throw new Error('Screenplay does not belong to this project.');
+    const previous=await readJson<ScreenplayRecord|null>(this.screenplayFile(projectId,screenplay.id),null);if(!previous)throw Error('Screenplay unavailable.');await ensureExpected(this.projectDir(projectId),this.actor,previous,screenplay,context?.expectedRevision??screenplay.storageRevision);
     const normalized: ScreenplayRecord = { ...normalizeSceneHeadings(screenplay), updatedAt: new Date().toISOString() };
     const errors = validateScreenplay(normalized); if (errors.length) throw new Error(`Screenplay was not saved: ${errors.join(' ')}`);
     await writeJsonAtomic(this.screenplayFile(projectId, screenplay.id), normalized);
-    await writeJsonAtomic(this.projectFile(projectId), { ...project, updatedAt: normalized.updatedAt });
-    return normalized;
+    await writeJsonAtomic(this.projectFile(projectId), { ...project, updatedAt: normalized.updatedAt }).catch(()=>{});
+    await historySafe(this.history(projectId),()=>this.history(projectId).screenplay(previous,normalized,context?.sceneId));
+    await periodicProjectBackup(this.projectDir(projectId),await this.rawWorkspace(projectId)).catch(()=>{});
+    return {...normalized,storageRevision:await stateRevision(normalized)};
   }
 
   async snapshot(project: ProjectRecord, reason: string): Promise<void> {
@@ -225,17 +251,21 @@ export class FileProjectRepository {
     return 'data:' + metadata.mime + ';base64,' + (await readFile(join(directory, assetId + '.bin'))).toString('base64');
   }
 
-  async saveStory(projectId: string, value: StoryRecord): Promise<StoryRecord> {
+  async saveStory(projectId:string,value:StoryRecord,context?:SaveContext):Promise<StoryRecord>{return projectWrite(this.projectDir(projectId),this.actor,()=>this.writeStory(projectId,value,context));}
+  private async writeStory(projectId: string, value: StoryRecord,context?:SaveContext): Promise<StoryRecord> {
     await this.get(projectId);
     const story = migrateStory(value, projectId);
     const file = join(this.projectDir(projectId), 'story.json');
     const previous = await readJson<StoryRecord | null>(file, null);
-    if (previous) {
+    await ensureExpected(this.projectDir(projectId),this.actor,previous,story,context?.expectedRevision);
+    await writeJsonAtomic(file, story);
+    if (previous) {try{
       const directory = join(this.root, 'Backups', projectId);
       await mkdir(directory, { recursive: true });
       await writeJsonAtomic(join(directory, `${Date.now()}-${randomUUID()}-story.json`), { backupType: 'story_snapshot', story: previous });
-    }
-    await writeJsonAtomic(file, story);
-    return story;
+    }catch{/* Current work has already been saved. */}}
+    await historySafe(this.history(projectId),()=>this.history(projectId).story(previous??migrateStory(null,projectId),story));
+    await periodicProjectBackup(this.projectDir(projectId),await this.rawWorkspace(projectId)).catch(()=>{});
+    return {...story,storageRevision:await stateRevision(story)};
   }
 }

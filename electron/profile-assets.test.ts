@@ -11,9 +11,9 @@ it('stores managed image references, persists profiles and copies assets with pr
   const assetId = await repository.importProjectImage(project.id,image);
   const workspace = await repository.openWorkspace(project.id), story = workspace.story!;
   story.characters.push({ id:'c',name:'Character',description:'',profile:{ age:'30s', images:[{ id:'image',assetId,label:'Primary' }],primaryImageId:'image' } });
-  await repository.saveStory(project.id,story);
+  const savedStory=await repository.saveStory(project.id,story);
   const reopened = new FileProjectRepository(root);
-  expect((await reopened.openWorkspace(project.id)).story).toEqual(story);
+  expect((await reopened.openWorkspace(project.id)).story).toEqual(savedStory);
   expect(await reopened.readProjectImage(project.id,assetId)).toBe(image);
   await repository.snapshot(project,'profile-test');
   expect((await readFile(join(root,'Backups',project.id,'assets',assetId+'.bin'))).length).toBeGreaterThan(0);

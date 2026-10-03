@@ -1,3 +1,5 @@
+import type { WriterIdentity, HistoryRequest } from '../src/shared/project-history';
+import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu } from 'electron';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -24,14 +26,16 @@ async function bootstrap(): Promise<BootstrapData> {
   return { appState, ownerConfig, preferences, storageHealth, projects, collections };
 }
 
+async function writerIdentity():Promise<WriterIdentity>{const file=configPath('writer-identity.json');let value=await readJson<WriterIdentity|null>(file,null);if(!value){value={id:randomUUID(),deviceId:randomUUID(),displayName:'You',color:'#e1a35f'};await writeJsonAtomic(file,value);}return value;}
 async function requireRepository() {
   const state = await getAppState();
   const health = await validateStorageRoot(state.storageRoot);
   if (!state.storageRoot || !health.writable) throw new Error('Project storage is unavailable. Reconnect it or choose a valid folder in Settings.');
-  return new FileProjectRepository(state.storageRoot);
+  return new FileProjectRepository(state.storageRoot,await writerIdentity());
 }
 
 function registerIpc() {
+  ipcMain.handle('history:request',async (_event,value:{projectId:string;request:HistoryRequest})=>(await requireRepository()).projectHistory(value.projectId,value.request));
   ipcMain.handle('app:bootstrap', bootstrap);
   ipcMain.handle('clipboard:read', readScreenplayClipboard);
   ipcMain.handle('clipboard:write', (_event, value: unknown) => writeScreenplayClipboard(value));
@@ -99,12 +103,12 @@ function registerIpc() {
   ipcMain.handle('worlds:save', async (_event, value) => (await requireRepository()).saveLibraryWorld(value));
   ipcMain.handle('story:save', async (_event, value: any) => {
     const projectId = z.string().uuid().parse(value?.projectId);
-    return (await requireRepository()).saveStory(projectId, value.story);
+    return (await requireRepository()).saveStory(projectId, value.story, value.context);
   });
   ipcMain.handle('screenplays:save', async (_event, value: unknown) => {
     const input = value as { projectId?: unknown; screenplay?: unknown };
     if (typeof input?.projectId !== 'string' || !input.screenplay || typeof input.screenplay !== 'object') throw new Error('Invalid screenplay save request.');
-    return (await requireRepository()).saveScreenplay(input.projectId, input.screenplay as ScreenplayRecord);
+    return (await requireRepository()).saveScreenplay(input.projectId, input.screenplay as ScreenplayRecord, (value as any).context);
   });
   ipcMain.handle('config:owner:save', async (_event, value: OwnerConfig) => {
     const config = { ...value, schemaVersion: 1 as const };
@@ -137,6 +141,9 @@ async function createWindow() {
     else if (params.selectionText) template.push({ role: 'copy' });
     if (template.length) Menu.buildFromTemplate(template).popup({ window: mainWindow! });
   });
+  let closeReady=false;
+  mainWindow.on('close',event=>{if(!closeReady){event.preventDefault();mainWindow?.webContents.send('workspace:flush-close');}});
+  const window=mainWindow;const ready=(event:Electron.IpcMainEvent)=>{if(event.sender!==window.webContents)return;closeReady=true;window.close();};ipcMain.on('workspace:close-ready',ready);window.once('closed',()=>ipcMain.removeListener('workspace:close-ready',ready));
   console.log('Desktop window ready.');
 }
 

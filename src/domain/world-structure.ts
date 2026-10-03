@@ -35,6 +35,8 @@ export function migrateWorldRecord(source: WorldRecord): WorldRecord {
   const remap = (ref: WorldRef): WorldRef => ref.kind === 'organisation' && changed.has(ref.id) ? { ...ref,kind:changed.get(ref.id)! } : ref;
   w.entities = w.entities.map(e => ({ ...e, fieldLinks:e.fieldLinks ? Object.fromEntries(Object.entries(e.fieldLinks).map(([k,r])=>[k,remap(r)])) : undefined }));
   w.relationships = w.relationships.map(r => { const next = { ...r,from:remap(r.from),to:remap(r.to) }; if (next.type === 'member of' && next.to.kind === 'structure') { const owner = w.entities.find(e=>e.id===next.to.id)?.organisationId; if(owner) { next.unitId=next.to.id; next.to={kind:'organisation',id:owner}; } } return next; });
+  // Existing explicit applicability keeps its meaning; clear assigned container links become applicability.
+  w.relationships=w.relationships.map(r=>r.from.kind==='rule'&&['organisation','structure','location'].includes(r.to.kind)&&r.type==='belongs to'?{...r,type:'applies to'}:r).map(r=>r.from.kind==='rule'&&['applies to','concerns'].includes(r.type)&&r.unitId&&w.entities.some(e=>e.id===r.unitId&&e.kind==='structure')?{...r,to:{kind:'structure' as const,id:r.unitId},unitId:undefined}:r);
   w.diagrams = w.diagrams.map(d=>({...d,root:d.root?remap(d.root):undefined,kinds:d.kinds?.includes('organisation')?[...new Set([...d.kinds,'structure' as const])]:d.kinds,collapsedIds:d.collapsedIds?.map(k=>{ const id=k.slice(k.indexOf(':')+1); return k.startsWith('organisation:') && changed.has(id)?changed.get(id)+':'+id:k; })}));
   w.structureModelVersion=1;
   return w;

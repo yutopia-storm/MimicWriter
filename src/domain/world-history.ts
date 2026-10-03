@@ -13,6 +13,12 @@ export function worldStateAt(entity: WorldEntity, story: StoryRecord, documents:
 export function saveWorldState(entity: WorldEntity, draft: WorldState, story: StoryRecord, documents: ScreenplayRecord[]) {
   if (draft.fromPoint && draft.untilPoint && (compareWorldPoints(draft.fromPoint,draft.untilPoint,story,documents) ?? -1) >= 0) throw new Error('The end must be after the start.');
   const existing = (entity.history ?? []).filter(h => h.id !== draft.id);
-  const history = existing.map(h => draft.fromPoint && !h.untilPoint && (!h.fromPoint || (compareWorldPoints(h.fromPoint,draft.fromPoint,story,documents) ?? 1) < 0) ? { ...h, untilPoint: draft.fromPoint } : h);
+  const history = existing.flatMap(h => {
+    if (!draft.fromPoint || h.untilPoint || h.fromPoint && (compareWorldPoints(h.fromPoint,draft.fromPoint,story,documents) ?? 1) >= 0) return [h];
+    const changed = Object.fromEntries(Object.entries(h.fields).filter(([key]) => key in draft.fields));
+    const retained = Object.fromEntries(Object.entries(h.fields).filter(([key]) => !(key in draft.fields)));
+    if (!Object.keys(changed).length) return [h];
+    return [{ ...h, fields: changed, untilPoint: draft.fromPoint }, ...Object.keys(retained).length ? [{ ...h, id: crypto.randomUUID(), fields: retained }] : []];
+  });
   return [...history,draft];
 }
